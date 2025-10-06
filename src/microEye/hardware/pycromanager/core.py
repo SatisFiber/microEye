@@ -102,9 +102,9 @@ class CoreWorker(threading.Thread):
         bool
             True if the core worker is initialized, False if the timeout is reached.
         '''
-        start_time = time.time()
+        start_time = time.monotonic()
         while not self.initialized:
-            if time.time() - start_time > timeout:
+            if time.monotonic() - start_time > timeout:
                 return False
             time.sleep(0.1)
         return True

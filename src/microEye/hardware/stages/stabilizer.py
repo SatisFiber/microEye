@@ -1,91 +1,39 @@
+import json
 import time
 import traceback
-import warnings
-from enum import Enum
+from enum import Enum, auto
 from queue import LifoQueue
 from threading import Event
-from typing import Optional
+from typing import Optional, Union
 
-import cv2
-import numba as nb
 import numpy as np
 from pyqtgraph.parametertree import Parameter
-from scipy.optimize import OptimizeWarning, curve_fit
-from scipy.signal import find_peaks
 
-from microEye.analysis.filters import FourierFilter
-from microEye.analysis.fitting import pyfit3Dcspline
-from microEye.analysis.fitting.fit import CV_BlobDetector
-from microEye.analysis.fitting.processing import nn_trajectories
-from microEye.analysis.tools.kymograms import get_kymogram_row
+from microEye.hardware.stages.stabilization.controller import (
+    Axis,
+    PIDController,
+    RejectionMethod,
+)
+from microEye.hardware.stages.stabilization.methods import (
+    CalibrationManager,
+    DataLogger,
+    FiducialStrategy,
+    PositionTracker,
+    ReflectionStrategy,
+    ROIManager,
+    StabilizationMethods,
+    StabilizationStrategy,
+)
 from microEye.qt import (
     QApplication,
-    QDateTime,
     QtCore,
     QtWidgets,
     Signal,
+    getOpenFileName,
     getSaveFileName,
 )
-from microEye.utils.gui_helper import GaussianOffSet
 from microEye.utils.parameter_tree import Tree
 from microEye.utils.thread_worker import QThreadWorker
-
-warnings.filterwarnings('ignore', category=OptimizeWarning)
-
-
-@nb.njit(parallel=True)
-def fast_nn_assignment(currentFrame, nextFrame, minDistance=0.0, maxDistance=30.0):
-    N = currentFrame.shape[0]
-    M = nextFrame.shape[0]
-    assigned = np.full(N, -1, dtype=np.int64)
-    distances = np.full(N, np.inf, dtype=np.float64)
-    for i in nb.prange(N):
-        min_dist = np.inf
-        min_idx = -1
-        for j in range(M):
-            dist = np.sqrt(np.sum((currentFrame[i, :2] - nextFrame[j, :2]) ** 2))
-            if minDistance <= dist <= maxDistance and dist < min_dist:
-                min_dist = dist
-                min_idx = j
-        if min_idx != -1:
-            assigned[i] = min_idx
-            distances[i] = min_dist
-    return assigned, distances
-
-
-@nb.njit
-def getXYshift(
-    previous: np.ndarray, current: np.ndarray, minDistance=0.0, maxDistance=30.0
-):
-    '''
-    Estimate X and Y shifts using fast Numba nearest neighbor assignment.
-
-    Returns
-    -------
-    tuple of float
-        The X and Y shifts.
-    '''
-    if (
-        previous is None
-        or current is None
-        or previous.shape[0] == 0
-        or current.shape[0] == 0
-    ):
-        return None
-
-    assigned, distances = fast_nn_assignment(
-        previous, current, minDistance, maxDistance
-    )
-    x_shifts = []
-    y_shifts = []
-    for i in range(previous.shape[0]):
-        idx = assigned[i]
-        if idx != -1:
-            x_shifts.append(current[idx, 0] - previous[i, 0])
-            y_shifts.append(current[idx, 1] - previous[i, 1])
-    if len(x_shifts) == 0 or len(y_shifts) == 0:
-        return None
-    return np.mean(np.array(x_shifts)), np.mean(np.array(y_shifts))
 
 
 class FocusStabilizerParams(Enum):
@@ -93,28 +41,44 @@ class FocusStabilizerParams(Enum):
     Enum class defining FocusStabilizer parameters.
     '''
 
-    ROI = 'Line ROI'
-    X1 = 'X1'
-    Y1 = 'Y1'
-    X2 = 'X2'
-    Y2 = 'Y2'
-    LINE_WIDTH = 'Line Width'
-    LENGTH = 'Length'
-    ANGLE = 'Angle [deg]'
-    SET_ROI = 'Set ROI'
+    LINE_WIDTH = 'Line ROI Width'
     SAVE = 'Save'
     LOAD = 'Load'
 
     FOCUS_TRACKING = 'Focus Stabilization'
     STABILIZATION_METHOD = 'Method'
     FOCUS_PARAMETER = 'Focus Parameter [pixel]'
-    CAL_COEFF = 'Calibration [pixel/nm]'
     USE_CAL = 'Use Calibration'
-    INVERTED = 'Inverted'
-    TRACKING_ENABLED = 'Stabilization Enabled'
-    FT_P = 'P'
-    FT_I = 'I'
-    FT_D = 'D'
+    Z_STABILIZATION = 'Stabilization (Z)'
+    XY_STABILIZATION = 'Stabilization (XY)'
+
+    X_CALIBRATION = 'Calibration (X) [pixel/nm]'
+    Y_CALIBRATION = 'Calibration (Y) [pixel/nm]'
+    Z_CALIBRATION = 'Calibration (Z) [pixel/nm]'
+
+    XY_OUTLIER_REJECTION = 'XY Outlier Rejection'
+    XY_OUTLIER_REJECTION_METHOD = 'XY Outlier Rejection.Method'
+    XY_OUTLIER_REJECTION_THRESHOLD = 'XY Outlier Rejection.Threshold'
+    XY_OUTLIER_REJECTION_MIN_POINTS = 'XY Outlier Rejection.Min Points'
+
+    X = 'X'
+    X_K_P = 'X.K_P'
+    X_K_I = 'X.K_I'
+    X_K_D = 'X.K_D'
+    X_INVERTED = 'X.Inverted'
+
+    Y = 'Y'
+    Y_K_P = 'Y.K_P'
+    Y_K_I = 'Y.K_I'
+    Y_K_D = 'Y.K_D'
+    Y_INVERTED = 'Y.Inverted'
+
+    Z = 'Z'
+    Z_K_P = 'Z.K_P'
+    Z_K_I = 'Z.K_I'
+    Z_K_D = 'Z.K_D'
+    Z_INVERTED = 'Z.Inverted'
+
     FT_TAU = 'Tau'
     FT_ERROR_TH = 'Error Threshold'
     PEAK_ACQUIRE = 'Start Peak Acquisition'
@@ -135,41 +99,30 @@ class FocusStabilizerParams(Enum):
         return self.value.split('.')
 
 
-def shift_and_append(arr: np.ndarray, new_value: float):
-    '''
-    Rolls the array and appends a new value at the end.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        The input array to roll.
-    new_value : float
-        The new value to append at the end of the rolled array.
-
-    Returns
-    -------
-    np.ndarray
-        The rolled array with the new value appended.
-    '''
-    arr = np.roll(arr, -1)
-    arr[-1] = new_value
-    return arr
+class FocusPlot(Enum):
+    LINE_PROFILE = auto()
+    LINE_PROFILE_FIT = auto()
+    X_SHIFT = auto()
+    Y_SHIFT = auto()
+    Z_SHIFT = auto()
+    XY_POINTS = auto()
+    Z_HISTOGRAM = auto()
+    LOCALIZATIONS = auto()
 
 
 class FocusStabilizer(QtCore.QObject):
     # Class attribute to hold the single instance
     _instance = None
 
-    TIME_POINTS = 500
-
-    METHODS = ['reflection', 'beads', 'beads astigmatic']
+    TIME_POINTS = 1000
 
     updateViewBox = Signal(object)
-    updatePlots = Signal(object, str)
+    updatePlots = Signal(dict)
     moveStage = Signal(bool, int)
-    parameterChanged = Signal(float)
-    calCoeffChanged = Signal(float)
-    focusStabilizationToggled = Signal(bool)
+    moveXYZ = Signal(float, float, float)
+    parameterChanged = Signal(object)
+    calCoeffChanged = Signal(np.ndarray)
+    focusStabilizationToggled = Signal(bool, Axis)
 
     def __new__(cls, *args, **kwargs):
         # If the single instance doesn't exist, create a new one
@@ -189,40 +142,51 @@ class FocusStabilizer(QtCore.QObject):
         super().__init__()
 
         self.__buffer = LifoQueue()
-        self.time_points = np.array(list(range(self.TIME_POINTS)))
-        self.parameter_buffer = np.ones((self.TIME_POINTS,))
 
-        self.total_shift = np.array([0.0, 0.0])
-        self.x_buffer = np.zeros((self.TIME_POINTS,))
-        self.y_buffer = np.zeros((self.TIME_POINTS,))
+        # History -> tracker
+        self.__tracker = PositionTracker(self.TIME_POINTS)
 
-        self.error_buffer = np.zeros((20,))
-        self.error_integral = 0
-        self.fit_params = None
+        # ROI manager
+        self.roi_manager = ROIManager()
 
-        self.X_ROI = np.array([25.5, 25.5])
-        self.Y_ROI = np.array([25.5, 281.5])
-        self.line_width = 1
+        # Default method
+        self.__method = StabilizationMethods.REFLECTION
 
-        self.__method = FocusStabilizer.METHODS[0]
+        # PID controller
+        self.__controller = PIDController(Kp=6.5, Ki=0.0, Kd=0.0)
 
-        self.__cal_coeff = 0.01
+        # Calibration manager
+        self.__cal_manager = CalibrationManager()
+
         self.__use_cal = False
-        self.__inverted = False
-        self.__parameter = 64
-        self.__stabilization = False
-        self.__P = 6.45
-        self.__I = 0.0
-        self.__D = 0.0
-        self.__tau = 0.0
+        self.__inverted = np.zeros((3,), dtype=bool)
+
+        # Stabilization flags
+        self.__z_stabilization = False
+        self.__xy_stabilization = False
+
+        # Initial positions
+        self.__initial_z_position = None
+        self.__initial_xy_positions = None
+
         self.__err_th = 0.001
 
         self.__preview = True
 
         self._exec_time = 0
 
+        # Data logging
+        self.__logger = DataLogger()
+
         self.file = None
         self.num_frames_saved = 0
+
+        # Method strategies
+        self._strategies: dict[StabilizationMethods, StabilizationStrategy] = {
+            StabilizationMethods.REFLECTION: ReflectionStrategy(),
+            StabilizationMethods.BEADS: FiducialStrategy(False),
+            StabilizationMethods.BEADS_ASTIGMATIC: FiducialStrategy(True),
+        }
 
         self.exit_event = Event()
 
@@ -245,28 +209,34 @@ class FocusStabilizer(QtCore.QObject):
         '''
         return self.__method
 
-    def setMethod(self, method: str):
+    def setMethod(self, method: Union[str, StabilizationMethods]):
         '''
         Sets the method for focus stabilization.
 
         Parameters
         ----------
-        method : str
+        method : StabilizationMethods
             The new method for focus stabilization.
         '''
-        if method in FocusStabilizer.METHODS:
-            self.__method = method
-            self.fit_params = None
+        if isinstance(method, str) and method in [
+            m.value for m in StabilizationMethods
+        ]:
+            method = StabilizationMethods(method)
 
-            self.total_shift = np.array([0.0, 0.0])
-            self.x_buffer = np.zeros((self.TIME_POINTS,))
-            self.y_buffer = np.zeros((self.TIME_POINTS,))
-        else:
+        if not isinstance(method, StabilizationMethods):
             raise ValueError(
-                f'Invalid method: {method}. Options: {FocusStabilizer.METHODS}'
+                f'Invalid method: {method}.'
+                f'Options: {[str(m) for m in StabilizationMethods]}'
             )
 
-    def calCoeff(self):
+        self.__method = method
+        self.__initial_z_position = None
+        self.__initial_xy_positions = None
+
+        self.__controller.reset()
+        self.__tracker.reset()
+
+    def calCoeff(self, axis: Optional[Axis]):
         '''
         Gets the current calibration coefficient.
 
@@ -275,9 +245,9 @@ class FocusStabilizer(QtCore.QObject):
         float
             The current calibration coefficient.
         '''
-        return self.__cal_coeff
+        return self.__cal_manager.get_coefficient(axis)
 
-    def setCalCoeff(self, value: float):
+    def setCalCoeff(self, value: float, axis: Axis):
         '''
         Sets the calibration coefficient.
 
@@ -286,8 +256,8 @@ class FocusStabilizer(QtCore.QObject):
         value : float
             The new calibration coefficient.
         '''
-        self.__cal_coeff = value
-        self.calCoeffChanged.emit(value)
+        self.__cal_manager.set_coefficient(axis, value)
+        self.calCoeffChanged.emit(self.__cal_manager.get_coefficient())
 
     def preview(self):
         '''
@@ -333,7 +303,7 @@ class FocusStabilizer(QtCore.QObject):
         '''
         self.__use_cal = use_cal
 
-    def isInverted(self):
+    def isInverted(self, axis: Optional[Axis]):
         '''
         Check if the direction is inverted.
 
@@ -342,9 +312,12 @@ class FocusStabilizer(QtCore.QObject):
         bool
             True if the direction is inverted, False otherwise.
         '''
-        return self.__inverted
+        if axis is None:
+            return self.__inverted.copy()
 
-    def setInverted(self, inverted: bool):
+        return self.__inverted[axis.axis_index()]
+
+    def setInverted(self, inverted: bool, axis: Axis):
         '''
         Set the flag indicating whether the direction is inverted.
 
@@ -353,7 +326,7 @@ class FocusStabilizer(QtCore.QObject):
         inverted : bool
             The flag value.
         '''
-        self.__inverted = inverted
+        self.__inverted[axis.axis_index()] = inverted
 
     def __len__(self):
         return len(self.__buffer.queue)
@@ -381,16 +354,7 @@ class FocusStabilizer(QtCore.QObject):
             self.__buffer.queue.clear()
         return res
 
-    def isImage(self, data: np.ndarray):
-        if data.ndim > 2:
-            raise ValueError('Data should be one or two dimensional array.')
-
-        if data.ndim == 1:
-            return False
-        elif data.ndim == 2:
-            return True
-
-    def setP(self, P: float):
+    def setP(self, P: float, axis: Axis):
         '''
         Set the P value.
 
@@ -399,9 +363,9 @@ class FocusStabilizer(QtCore.QObject):
         P : float
             The P value.
         '''
-        self.__P = P
+        self.__controller.set_Kp(P, axis)
 
-    def setI(self, _I: float):
+    def setI(self, _I: float, axis: Axis):
         '''
         Set the I value.
 
@@ -410,9 +374,9 @@ class FocusStabilizer(QtCore.QObject):
         _I : float
             The I value.
         '''
-        self.__I = _I
+        self.__controller.set_Ki(_I, axis)
 
-    def setD(self, D: float):
+    def setD(self, D: float, axis: Axis):
         '''
         Set the D value.
 
@@ -421,7 +385,19 @@ class FocusStabilizer(QtCore.QObject):
         D : float
             The D value.
         '''
-        self.__D = D
+        self.__controller.set_Kd(D, axis)
+
+    def set_gains(
+        self,
+        axis: Optional[Axis],
+        Kp: Union[float, tuple] = 1.0,
+        Ki: Union[float, tuple] = 0.0,
+        Kd: Union[float, tuple] = 0.0,
+    ):
+        '''
+        Set the controller gains for a specific axis.
+        '''
+        self.__controller.set_gains(axis, Kp, Ki, Kd)
 
     def setTau(self, tau: float):
         '''
@@ -445,16 +421,38 @@ class FocusStabilizer(QtCore.QObject):
         '''
         self.__err_th = error_th
 
-    def getPID(self):
+    def setRejectionMethod(self, method: RejectionMethod):
         '''
-        Get the current PID values.
+        Set the outlier rejection method.
 
-        Returns
-        -------
-        tuple of float
-            The current PID values as a tuple (P, I, D, tau, error_th).
+        Parameters
+        ----------
+        method : RejectionMethod
+            The outlier rejection method.
         '''
-        return (self.__P, self.__I, self.__D, self.__tau, self.__err_th)
+        self.__controller.rejection_method = method
+
+    def setOutlierThreshold(self, value: float):
+        '''
+        Set the outlier rejection threshold.
+
+        Parameters
+        ----------
+        value : float
+            The outlier rejection threshold.
+        '''
+        self.__controller.outlier_threshold = value
+
+    def setOutlierMinPoints(self, value: int):
+        '''
+        Set the minimum number of points for outlier rejection.
+
+        Parameters
+        ----------
+        value : int
+            The minimum number of points for outlier rejection.
+        '''
+        self.__controller.outlier_min_points = value
 
     def getParameter(self):
         '''
@@ -465,27 +463,29 @@ class FocusStabilizer(QtCore.QObject):
         float
             The current focus parameter.
         '''
-        return self.__parameter
+        return self.__initial_z_position
 
-    def setParameter(self, value: float, incerement: bool = False):
+    def setParameter(self, value: Union[float, np.ndarray], incerement: bool = False):
         '''
         Set the focus parameter.
 
         Parameters
         ----------
-        value : float
+        value : Union[float, np.ndarray]
             The new focus parameter value.
+        axis : Axis
+            The axis for which to set the focus parameter.
         incerement : bool, optional
             If True, increment the current focus parameter value by the given value,
             otherwise set the focus parameter to the given value.
         '''
-        if incerement:
-            self.__parameter += value
+        if incerement and isinstance(self.__initial_z_position, (float, int)):
+            self.__initial_z_position += value
         else:
-            self.__parameter = value
-        self.parameterChanged.emit(self.__parameter)
+            self.__initial_z_position = value
+        self.parameterChanged.emit(self.__initial_z_position)
 
-    def isFocusStabilized(self):
+    def isFocusStabilized(self, axis: Axis):
         '''
         Check if automatic Focus Stabilization is enabled.
 
@@ -494,9 +494,12 @@ class FocusStabilizer(QtCore.QObject):
         bool
             True if automatic Focus Stabilization is enabled, False otherwise.
         '''
-        return self.__stabilization
+        if axis == Axis.Z:
+            return self.__z_stabilization
+        elif axis in [Axis.X, Axis.Y]:
+            return self.__xy_stabilization
 
-    def toggleFocusStabilization(self, value: bool = None):
+    def toggleFocusStabilization(self, axis: Axis, value: bool = None):
         '''
         Toggles automatic Focus Stabilization.
 
@@ -506,6 +509,8 @@ class FocusStabilizer(QtCore.QObject):
 
         Parameters
         ----------
+        axis : Axis
+            The axis for which to toggle the stabilization.
         value : bool, optional
             The new state of the automatic Focus Stabilization. Default is `None`.
 
@@ -514,14 +519,43 @@ class FocusStabilizer(QtCore.QObject):
         bool
             The current state of the automatic Focus Stabilization.
         '''
-        if value is None:
-            self.__stabilization = not self.__stabilization
+        ref = self.__z_stabilization if axis == Axis.Z else self.__xy_stabilization
+
+        ref = not ref if value is None else value
+
+        if axis == Axis.Z:
+            self.__z_stabilization = ref
         else:
-            self.__stabilization = value
+            self.__xy_stabilization = ref
 
-        self.focusStabilizationToggled.emit(self.__stabilization)
+        self.__controller.reset([Axis.Z] if axis == Axis.Z else [Axis.X, Axis.Y])
 
-        return self.__stabilization
+        self.focusStabilizationToggled.emit(ref, axis)
+
+        return ref
+
+    def get_config(self):
+        '''
+        Get the current configuration values of controller and calibration.
+
+        Returns
+        -------
+        dict
+            The current configuration values as a dictionary.
+        '''
+        return {
+            'Kp': self.__controller.get_Kp(None).tolist(),
+            'Ki': self.__controller.get_Ki(None).tolist(),
+            'Kd': self.__controller.get_Kd(None).tolist(),
+            'error_th': self.__err_th,
+            'cal_coeff': self.__cal_manager.get_coefficient().tolist(),
+            'use_cal': self.__use_cal,
+            'inverted': self.__inverted.tolist(),
+            'method': str(self.__method),
+            'rejection_method': str(self.__controller.rejection_method),
+            'rejection_threshold': self.__controller.outlier_threshold,
+            'rejection_min_points': self.__controller.outlier_min_points,
+        }
 
     def startWorker(self):
         self.worker = QThreadWorker(FocusStabilizer.instance().worker_function)
@@ -535,14 +569,15 @@ class FocusStabilizer(QtCore.QObject):
         '''
         counter = 0
         self._exec_time = 0
-        now = QDateTime.currentDateTime()
+        self.__tracker.fill_time(time.monotonic_ns() / 1e9)
         QtCore.QThread.msleep(100)
         while not self.exit_event.is_set():
             try:
                 # proceed only if the buffer is not empty
                 if not self.isEmpty():
-                    self._exec_time = now.msecsTo(QDateTime.currentDateTime())
-                    now = QDateTime.currentDateTime()
+                    self.__tracker.advance_time(time.monotonic_ns() / 1e9)
+
+                    self._exec_time = self.__tracker.last_interval * 1e3  # in ms
 
                     method = self.method()
 
@@ -551,42 +586,21 @@ class FocusStabilizer(QtCore.QObject):
                     if self.preview():
                         self.updateViewBox.emit(image.copy())
 
-                    if self.isImage(image):
-                        if method == 'reflection':
-                            # get the kymogram row from the image
-                            image = get_kymogram_row(
-                                image, self.X_ROI, self.Y_ROI, self.line_width
-                            )
-                        elif method == 'beads':
-                            # crop using the ROI two corners
-                            image = image[
-                                int(self.Y_ROI[0]) : int(self.Y_ROI[1]),
-                                int(self.X_ROI[0]) : int(self.X_ROI[1]),
-                            ]
-
                     # fit the parameter and stabilize
-                    self.fit_parameter(image.copy(), method)
+                    shifts = self.fit_parameter(image.copy(), method)
                     # stabilize the focus
-                    self.stabilize()
+                    self.stabilize(shifts)
                     # append parameter to the file if file is set
-                    self.saveToFile()
+                    self.log_to_file()
 
                     counter = counter + 1
-
-                    # update the plots with the current parameter
-                    self.updatePlots.emit(
-                        image.copy()
-                        if method == 'reflection'
-                        else np.c_[self.x_buffer, self.y_buffer],
-                        method,
-                    )
                 QtCore.QThread.usleep(100)  # sleep for 100us
             except Exception as e:
                 traceback.print_exc()
 
         print(f'{FocusStabilizer.__name__} worker is terminating.')
 
-    def fit_parameter(self, data: np.ndarray, method: str):
+    def fit_parameter(self, data: np.ndarray, method: StabilizationMethods):
         """
         Fit the data to the specified method and update the parameter buffer.
 
@@ -594,191 +608,153 @@ class FocusStabilizer(QtCore.QObject):
         ----------
         data : np.ndarray
             The input data to fit.
-        method : str
-            The method to use for fitting. For options check `FocusStabilizer.METHODS`.
+        method : StabilizationMethods
+            The method to use for fitting. For options check `StabilizationMethods`.
 
             - 'reflection': Fit a linear ROI to a GaussianOffSet function.
             - 'beads': Fit beads using a 2D Gaussian function and extract average sigma.
         """
-        if method not in FocusStabilizer.METHODS:
+        if not isinstance(method, StabilizationMethods):
             raise ValueError(
-                f'Invalid method: {method}. Options: {FocusStabilizer.METHODS}'
+                f'Invalid method: {method}.'
+                f'Options: {[str(m) for m in StabilizationMethods]}'
             )
 
-        if method == 'reflection':
-            self.peak_fit(data)
+        shifts = {
+            Axis.X: 0.0,
+            Axis.Y: 0.0,
+            Axis.Z: 0.0,
+        }
 
-        elif method in ['beads', 'beads astigmatic']:
-            self.beads_fit(data, astigmatic=method == 'beads astigmatic')
+        append = {
+            Axis.X: 0.0,
+            Axis.Y: 0.0,
+            Axis.Z: 0.0,
+        }
 
-    def stabilize(self):
-        try:
-            if self.isFocusStabilized():
-                err = np.average(self.parameter_buffer[-1] - self.getParameter())
-                tau = self.__tau if self.__tau > 0 else (max(self._exec_time, 1) / 1000)
-                self.error_integral += err * tau
-                diff = (err - self.error_buffer[-1]) / tau
+        Localizations = {
+            'x': [],
+            'y': [],
+        }
 
-                self.error_buffer = shift_and_append(self.error_buffer, err)
+        line_profile = {
+            'y': [],
+            'fit_params': None,
+        }
 
-                step = int(
-                    (err * self.__P)
-                    + (self.error_integral * self.__I)
-                    + (diff * self.__D)
+        if method in self._strategies:
+            res = self._strategies[method].fit(
+                data, self.roi_manager, self.__cal_manager, self.__controller
+            )
+
+            if res is not None:
+                z_param = res['params'].get('z', None)
+                xy_params = res['params'].get('xy', None)
+
+                fit_params = res.get('fit_params', None)
+
+                line_profile['y'] = res.get('line_profile', [])
+                if line_profile['y']:
+                    line_profile['fit_params'] = fit_params
+
+                Localizations = res.get('localizations', Localizations)
+
+                _shifts = self._strategies[method].get_shifts(
+                    self.getParameter(),
+                    z_param,
+                    self.__initial_xy_positions,
+                    xy_params,
+                    self.__cal_manager,
+                    self.__controller,
                 )
-                if abs(err) > self.__err_th:
-                    direction = (step <= 0) if not self.isInverted() else (step > 0)
-                    self.moveStage.emit(direction, abs(step))
-            else:
-                self.setParameter(self.parameter_buffer[-1])
-                self.error_buffer = np.zeros((20,))
-                self.error_integral = 0
+
+                if z_param is not None:
+                    append[Axis.Z] = z_param
+
+                    if not self.isFocusStabilized(Axis.Z):
+                        self.setParameter(z_param)
+                    else:
+                        shifts[Axis.Z] = _shifts[Axis.Z]
+
+                if xy_params is not None:
+                    append[Axis.X] = _shifts[Axis.X]
+                    append[Axis.Y] = _shifts[Axis.Y]
+
+                    if not self.isFocusStabilized(Axis.X):
+                        self.__initial_xy_positions = xy_params
+                    else:
+                        shifts[Axis.X] = _shifts[Axis.X]
+                        shifts[Axis.Y] = _shifts[Axis.Y]
+
+        self.__tracker.append_axis(Axis.X, append[Axis.X])
+        self.__tracker.append_axis(Axis.Y, append[Axis.Y])
+        self.__tracker.append_axis(Axis.Z, append[Axis.Z])
+
+        time, positions = self.__tracker.snapshot()
+
+        self.updatePlots.emit(
+            {
+                'time': time,
+                'positions': positions,
+                'localizations': Localizations,
+                'line_profile': line_profile,
+            }
+        )
+
+        return shifts
+
+    def stabilize(self, shifts: dict[Axis, float]):
+        try:
+            output = self.__controller.response(
+                self.__tracker.last_time, shifts[Axis.X], shifts[Axis.Y], shifts[Axis.Z]
+            )
+
+            output[Axis.X.axis_index()] *= self.isFocusStabilized(Axis.X)
+            output[Axis.Y.axis_index()] *= self.isFocusStabilized(Axis.Y)
+            output[Axis.Z.axis_index()] *= self.isFocusStabilized(Axis.Z)
+
+            self.moveXYZ(
+                output[Axis.X.axis_index()],
+                output[Axis.Y.axis_index()],
+                output[Axis.Z.axis_index()],
+            )
         except Exception as e:
             pass
 
-    def saveToFile(self):
+    def log_to_file(self):
         '''
-        Save the current execution time and fit parameters to a file.
+        Log the current time and positions to the file if logging is active.
         '''
-        if self.file is not None:
-            with open(self.file, 'ab') as file:
-                if self.num_frames_saved == 0:
-                    header = ';'.join(
-                        [
-                            'Execution Time [ms]',
-                            'Focus Parameter [pixel]',
-                            'X Shift [pixel]',
-                            'Y Shift [pixel]',
-                        ]
-                    )
-                    # Write header if this is the first frame
-                    file.write(header.encode('utf-8') + b'\n')
-                np.savetxt(
-                    file,
-                    np.array(
-                        (
-                            self._exec_time,
-                            self.parameter_buffer[-1],
-                            self.x_buffer[-1],
-                            self.y_buffer[-1],
-                        )
-                    ).reshape((1, 4)),
-                    delimiter=';',
-                )
-            self.num_frames_saved = 1 + self.num_frames_saved
+        if self.__logger.is_active():
+            self.__logger.log(self.__tracker.last_row)
 
-    def peak_fit(self, data: np.ndarray):
+    def stop_logging(self):
         '''
-        Fit the data to a GaussianOffSet function and update the parameter buffer.
+        Stop logging data to the file.
+        '''
+        self.__logger.stop()
+
+    def start_logging(self, file: str):
+        '''
+        Start logging data to the specified file.
 
         Parameters
         ----------
-        data : np.ndarray
-            The input data to fit.
-
-        Raises
-        ------
-        Exception
-            If an error occurs during the fitting process.
+        file : str
+            The path to the file where data will be logged.
         '''
-        try:
-            # find IR peaks above a specific height
-            peaks = find_peaks(data, height=1)
-            nPeaks = len(peaks[0])  # number of peaks
-            maxPeakIdx = np.argmax(peaks[1]['peak_heights'])  # highest peak
-            x0 = 64 if nPeaks == 0 else peaks[0][maxPeakIdx]
-            a0 = 1 if nPeaks == 0 else peaks[1]['peak_heights'][maxPeakIdx]
+        self.__logger.start(file)
 
-            # curve_fit to GaussianOffSet
-            self.fit_params, _ = curve_fit(
-                GaussianOffSet, np.arange(data.shape[0]), data, p0=[a0, x0, 1, 0]
-            )
-            self.parameter_buffer = shift_and_append(
-                self.parameter_buffer, self.fit_params[1]
-            )
-        except Exception as e:
-            pass
-            # print('Failed Gauss. fit: ' + str(e))
-
-    def beads_fit(self, data: np.ndarray, sigma: float = 1.0, astigmatic: bool = False):
+    def is_logging(self):
         '''
-        Fit the data to a 2D Gaussian function and update the parameter buffer.
+        Check if logging is active.
 
-        Parameters
-        ----------
-        data : np.ndarray
-            The input data to fit.
-
-        Raises
-        ------
-        Exception
-            If an error occurs during the fitting process.
+        Returns
+        -------
+        bool
+            True if logging is active, False otherwise.
         '''
-        try:
-            # apply Fourier filter to the data
-            filtered = FourierFilter().run(data)
-
-            # Threshold the image
-            _, th_img = cv2.threshold(
-                filtered,
-                np.quantile(filtered, 1 - 1e-4) * 0.4,
-                255,
-                cv2.THRESH_BINARY,
-            )
-
-            # Detect blobs
-            points, im_with_keypoints = CV_BlobDetector().find_peaks_preview(
-                th_img, None
-            )
-
-            if len(points) < 1:
-                self.fit_params = None
-                return
-
-            # Get the ROI list for fitting
-            roi_sz = 21
-            rois, coords = pyfit3Dcspline.get_roi_list(data, points, roi_sz)
-
-            Params, CRLBs, LogLikelihood = pyfit3Dcspline.CPUmleFit_LM(
-                rois, 4 if astigmatic else 2, np.array([sigma]), None, 0
-            )
-
-            if Params is None and len(Params) < 1:
-                self.fit_params = None
-                return
-            elif Params.ndim == 1:
-                Params = Params[np.newaxis, :]
-
-            mean_params = np.mean(Params, axis=0)
-            self.parameter_buffer = shift_and_append(
-                self.parameter_buffer,
-                (
-                    mean_params[4]
-                    if not astigmatic
-                    else (mean_params[4] ** 2 - mean_params[5] ** 2)
-                ),
-            )
-
-            Params[:, 0] += coords[:, 0]  # X coordinate
-            Params[:, 1] += coords[:, 1]  # Y coordinate
-
-            # Calculate the X and Y shifts between previous and current parameters
-            result = getXYshift(self.fit_params, Params)
-
-            self.fit_params = Params
-
-            if result is None:
-                return
-
-            x_shift, y_shift = result
-            self.total_shift += np.array([x_shift, y_shift])
-
-            self.x_buffer = shift_and_append(self.x_buffer, self.total_shift[0])
-            self.y_buffer = shift_and_append(self.y_buffer, self.total_shift[1])
-
-        except Exception as e:
-            traceback.print_exc()
-            print('Failed beads fit: ' + str(e))
+        return self.__logger.is_active()
 
 
 class FocusStabilizerView(Tree):
@@ -786,6 +762,7 @@ class FocusStabilizerView(Tree):
     setRoiActivated = Signal()
     saveActivated = Signal()
     loadActivated = Signal()
+    methodChanged = Signal(StabilizationMethods)
 
     def __init__(
         self,
@@ -808,13 +785,10 @@ class FocusStabilizerView(Tree):
         '''
         super().__init__(parent=parent)
 
-        FocusStabilizer.instance().parameterChanged.connect(
-            lambda value: self.set_param_value(
-                FocusStabilizerParams.FOCUS_PARAMETER, value
-            )
-        )
+        FocusStabilizer.instance().parameterChanged.connect(self.update_focus_parameter)
+
         FocusStabilizer.instance().calCoeffChanged.connect(
-            lambda value: self.set_param_value(FocusStabilizerParams.CAL_COEFF, value)
+            self.update_calibration_coefficients
         )
 
         self.setMinimumWidth(325)
@@ -832,33 +806,6 @@ class FocusStabilizerView(Tree):
                 'type': 'bool',
                 'value': True,
             },
-            {'name': str(FocusStabilizerParams.ROI), 'type': 'group', 'children': []},
-            {
-                'name': str(FocusStabilizerParams.X1),
-                'type': 'float',
-                'value': 25.5,
-                'step': 1,
-            },
-            {
-                'name': str(FocusStabilizerParams.Y1),
-                'type': 'float',
-                'value': 25.5,
-                'step': 1,
-            },
-            {
-                'name': str(FocusStabilizerParams.X2),
-                'type': 'float',
-                'value': 25.5,
-                'step': 1,
-                'readonly': True,
-            },
-            {
-                'name': str(FocusStabilizerParams.Y2),
-                'type': 'float',
-                'value': 281.5,
-                'step': 1,
-                'readonly': True,
-            },
             {
                 'name': str(FocusStabilizerParams.LINE_WIDTH),
                 'type': 'int',
@@ -866,21 +813,6 @@ class FocusStabilizerView(Tree):
                 'limits': [1, 100],
                 'step': 1,
             },
-            {
-                'name': str(FocusStabilizerParams.LENGTH),
-                'type': 'int',
-                'value': 256,
-                'limits': [64, 4096],
-                'step': 1,
-            },
-            {
-                'name': str(FocusStabilizerParams.ANGLE),
-                'type': 'float',
-                'value': 0,
-                'limits': [0, 360],
-                'step': 1,
-            },
-            {'name': str(FocusStabilizerParams.SET_ROI), 'type': 'action'},
             {'name': str(FocusStabilizerParams.SAVE), 'type': 'action'},
             {'name': str(FocusStabilizerParams.LOAD), 'type': 'action'},
             {
@@ -891,8 +823,8 @@ class FocusStabilizerView(Tree):
             {
                 'name': str(FocusStabilizerParams.STABILIZATION_METHOD),
                 'type': 'list',
-                'value': FocusStabilizer.METHODS[0],
-                'limits': FocusStabilizer.METHODS,
+                'value': StabilizationMethods.REFLECTION.value,
+                'limits': [method.value for method in StabilizationMethods],
             },
             {
                 'name': str(FocusStabilizerParams.FOCUS_PARAMETER),
@@ -903,51 +835,176 @@ class FocusStabilizerView(Tree):
                 'decimals': 6,
             },
             {
-                'name': str(FocusStabilizerParams.CAL_COEFF),
-                'type': 'float',
-                'value': 0.01,
-                'step': 0.01,
-                'dec': False,
-                'decimals': 6,
-            },
-            {
                 'name': str(FocusStabilizerParams.USE_CAL),
                 'type': 'bool',
                 'value': False,
             },
             {
-                'name': str(FocusStabilizerParams.INVERTED),
+                'name': str(FocusStabilizerParams.XY_STABILIZATION),
                 'type': 'bool',
                 'value': False,
             },
             {
-                'name': str(FocusStabilizerParams.TRACKING_ENABLED),
+                'name': str(FocusStabilizerParams.Z_STABILIZATION),
                 'type': 'bool',
                 'value': False,
             },
             {
-                'name': str(FocusStabilizerParams.FT_P),
+                'name': str(FocusStabilizerParams.X_CALIBRATION),
                 'type': 'float',
-                'value': 6.450,
+                'value': 1.0,
                 'step': 0.01,
                 'dec': False,
                 'decimals': 6,
             },
             {
-                'name': str(FocusStabilizerParams.FT_I),
+                'name': str(FocusStabilizerParams.Y_CALIBRATION),
                 'type': 'float',
-                'value': 0.0,
+                'value': 1.0,
                 'step': 0.01,
                 'dec': False,
                 'decimals': 6,
             },
             {
-                'name': str(FocusStabilizerParams.FT_D),
+                'name': str(FocusStabilizerParams.Z_CALIBRATION),
                 'type': 'float',
-                'value': 0.0,
+                'value': 1.0,
                 'step': 0.01,
                 'dec': False,
                 'decimals': 6,
+            },
+            {
+                'name': str(FocusStabilizerParams.XY_OUTLIER_REJECTION),
+                'type': 'group',
+                'children': [
+                    {
+                        'name': str(FocusStabilizerParams.XY_OUTLIER_REJECTION_METHOD),
+                        'type': 'list',
+                        'limits': [method.value for method in RejectionMethod],
+                        'value': RejectionMethod.NONE.value,
+                    },
+                    {
+                        'name': str(
+                            FocusStabilizerParams.XY_OUTLIER_REJECTION_THRESHOLD
+                        ),
+                        'type': 'float',
+                        'value': 2.0,
+                    },
+                    {
+                        'name': str(
+                            FocusStabilizerParams.XY_OUTLIER_REJECTION_MIN_POINTS
+                        ),
+                        'type': 'int',
+                        'value': 4,
+                        'limits': [3, 25],
+                        'step': 1,
+                    },
+                ],
+            },
+            {
+                'name': str(FocusStabilizerParams.X),
+                'type': 'group',
+                'children': [
+                    {
+                        'name': str(FocusStabilizerParams.X_INVERTED),
+                        'type': 'bool',
+                        'value': False,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.X_K_P),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.X_K_I),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.X_K_D),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                ],
+            },
+            {
+                'name': str(FocusStabilizerParams.Y),
+                'type': 'group',
+                'children': [
+                    {
+                        'name': str(FocusStabilizerParams.Y_INVERTED),
+                        'type': 'bool',
+                        'value': False,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Y_K_P),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Y_K_I),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Y_K_D),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                ],
+            },
+            {
+                'name': str(FocusStabilizerParams.Z),
+                'type': 'group',
+                'children': [
+                    {
+                        'name': str(FocusStabilizerParams.Z_INVERTED),
+                        'type': 'bool',
+                        'value': False,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Z_K_P),
+                        'type': 'float',
+                        'value': 6.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Z_K_I),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                    {
+                        'name': str(FocusStabilizerParams.Z_K_D),
+                        'type': 'float',
+                        'value': 0.0,
+                        'step': 0.01,
+                        'dec': False,
+                        'decimals': 6,
+                    },
+                ],
             },
             {
                 'name': str(FocusStabilizerParams.FT_TAU),
@@ -975,13 +1032,12 @@ class FocusStabilizerView(Tree):
             QtWidgets.QHeaderView.ResizeMode.ResizeToContents
         )
 
-        self.get_param(FocusStabilizerParams.SET_ROI).sigActivated.connect(
-            lambda: self.setRoiActivated.emit()
-        )
         self.get_param(FocusStabilizerParams.SAVE).sigActivated.connect(
-            self.export_json
+            self.export_config
         )
-        self.get_param(FocusStabilizerParams.LOAD).sigActivated.connect(self.load_json)
+        self.get_param(FocusStabilizerParams.LOAD).sigActivated.connect(
+            self.import_config
+        )
 
         self.get_param(FocusStabilizerParams.PEAK_ACQUIRE).sigActivated.connect(
             self.start_IR
@@ -1012,66 +1068,123 @@ class FocusStabilizerView(Tree):
         for p, _, data in changes:
             path = self.param_tree.childPath(p)
 
-            if path == FocusStabilizerParams.get_path(
-                FocusStabilizerParams.TRACKING_ENABLED
-            ):
-                FocusStabilizer.instance().toggleFocusStabilization(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.FT_P):
-                FocusStabilizer.instance().setP(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.FT_I):
-                FocusStabilizer.instance().setI(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.FT_D):
-                FocusStabilizer.instance().setD(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.FT_TAU):
+            fsParam = FocusStabilizerParams('.'.join(path))
+
+            if fsParam == FocusStabilizerParams.Z_STABILIZATION:
+                FocusStabilizer.instance().toggleFocusStabilization(Axis.Z, data)
+            if fsParam == FocusStabilizerParams.XY_STABILIZATION:
+                FocusStabilizer.instance().toggleFocusStabilization(Axis.X, data)
+            if fsParam == FocusStabilizerParams.X_K_P:
+                FocusStabilizer.instance().setP(data, Axis.X)
+            if fsParam == FocusStabilizerParams.X_K_I:
+                FocusStabilizer.instance().setI(data, Axis.X)
+            if fsParam == FocusStabilizerParams.X_K_D:
+                FocusStabilizer.instance().setD(data, Axis.X)
+            if fsParam == FocusStabilizerParams.Y_K_P:
+                FocusStabilizer.instance().setP(data, Axis.Y)
+            if fsParam == FocusStabilizerParams.Y_K_I:
+                FocusStabilizer.instance().setI(data, Axis.Y)
+            if fsParam == FocusStabilizerParams.Y_K_D:
+                FocusStabilizer.instance().setD(data, Axis.Y)
+            if fsParam == FocusStabilizerParams.Z_K_P:
+                FocusStabilizer.instance().setP(data, Axis.Z)
+            if fsParam == FocusStabilizerParams.Z_K_I:
+                FocusStabilizer.instance().setI(data, Axis.Z)
+            if fsParam == FocusStabilizerParams.Z_K_D:
+                FocusStabilizer.instance().setD(data, Axis.Z)
+            if fsParam == FocusStabilizerParams.FT_TAU:
                 FocusStabilizer.instance().setTau(data)
-            if path == FocusStabilizerParams.get_path(
-                FocusStabilizerParams.FT_ERROR_TH
-            ):
+            if fsParam == FocusStabilizerParams.FT_ERROR_TH:
                 FocusStabilizer.instance().setErrorTh(data)
 
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.X1):
-                FocusStabilizer.instance().X_ROI[0] = data
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.X2):
-                FocusStabilizer.instance().X_ROI[1] = data
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.Y1):
-                FocusStabilizer.instance().Y_ROI[0] = data
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.Y2):
-                FocusStabilizer.instance().Y_ROI[1] = data
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.LINE_WIDTH):
-                FocusStabilizer.instance().line_width = data
+            if fsParam == FocusStabilizerParams.LINE_WIDTH:
+                FocusStabilizer.instance().roi_manager.set_linewidth(data)
 
-            if path == FocusStabilizerParams.get_path(
-                FocusStabilizerParams.STABILIZATION_METHOD
-            ):
-                FocusStabilizer.instance().setMethod(data)
+            if fsParam == FocusStabilizerParams.STABILIZATION_METHOD:
+                method = StabilizationMethods(data)
+                FocusStabilizer.instance().setMethod(method)
+                self.methodChanged.emit(method)
 
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.INVERTED):
-                FocusStabilizer.instance().setInverted(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.USE_CAL):
+            if fsParam == FocusStabilizerParams.XY_OUTLIER_REJECTION_METHOD:
+                FocusStabilizer.instance().setRejectionMethod(RejectionMethod(data))
+            if fsParam == FocusStabilizerParams.XY_OUTLIER_REJECTION_THRESHOLD:
+                FocusStabilizer.instance().setOutlierThreshold(data)
+            if fsParam == FocusStabilizerParams.XY_OUTLIER_REJECTION_MIN_POINTS:
+                FocusStabilizer.instance().setOutlierMinPoints(data)
+
+            if fsParam == FocusStabilizerParams.X_INVERTED:
+                FocusStabilizer.instance().setInverted(data, Axis.X)
+            if fsParam == FocusStabilizerParams.Y_INVERTED:
+                FocusStabilizer.instance().setInverted(data, Axis.Y)
+            if fsParam == FocusStabilizerParams.Z_INVERTED:
+                FocusStabilizer.instance().setInverted(data, Axis.Z)
+            if fsParam == FocusStabilizerParams.USE_CAL:
                 FocusStabilizer.instance().setUseCal(data)
-            if path == FocusStabilizerParams.get_path(
-                FocusStabilizerParams.FOCUS_PARAMETER
-            ):
+            if fsParam == FocusStabilizerParams.FOCUS_PARAMETER:
                 FocusStabilizer.instance().setParameter(data)
-            if path == FocusStabilizerParams.get_path(FocusStabilizerParams.CAL_COEFF):
-                FocusStabilizer.instance().setCalCoeff(data)
-            if path == FocusStabilizerParams.get_path(
-                FocusStabilizerParams.PREVIEW_IMAGE
-            ):
+
+            if fsParam == FocusStabilizerParams.X_CALIBRATION:
+                FocusStabilizer.instance().setCalCoeff(data, Axis.X)
+            if fsParam == FocusStabilizerParams.Y_CALIBRATION:
+                FocusStabilizer.instance().setCalCoeff(data, Axis.Y)
+            if fsParam == FocusStabilizerParams.Z_CALIBRATION:
+                FocusStabilizer.instance().setCalCoeff(data, Axis.Z)
+
+            if fsParam == FocusStabilizerParams.PREVIEW_IMAGE:
                 FocusStabilizer.instance().setPreview(data)
 
-    def toggleFocusStabilization(self):
+    def update_focus_parameter(self, value: float):
+        '''
+        Update the focus parameter in the parameter tree.
+
+        Parameters
+        ----------
+        value : float
+            The new focus parameter value.
+
+        Returns
+        -------
+        None
+        '''
+        if isinstance(value, (float, int)):
+            self.set_param_value(FocusStabilizerParams.FOCUS_PARAMETER, value)
+        else:
+            self.set_param_value(FocusStabilizerParams.FOCUS_PARAMETER, np.nan)
+
+    def update_calibration_coefficients(self, coeffs: np.ndarray):
+        '''
+        Update the calibration coefficients in the parameter tree.
+
+        Parameters
+        ----------
+        coeffs : np.ndarray
+            The new calibration coefficients.
+
+        Returns
+        -------
+        None
+        '''
+        self.set_param_value(FocusStabilizerParams.X_CALIBRATION, coeffs[0])
+        self.set_param_value(FocusStabilizerParams.Y_CALIBRATION, coeffs[1])
+        self.set_param_value(FocusStabilizerParams.Z_CALIBRATION, coeffs[2])
+
+    def toggleFocusStabilization(self, axis: Axis):
         '''Toggles the focus stabilization.'''
+        param = (
+            FocusStabilizerParams.Z_STABILIZATION
+            if axis == Axis.Z
+            else FocusStabilizerParams.XY_STABILIZATION
+        )
         self.set_param_value(
-            FocusStabilizerParams.TRACKING_ENABLED,
-            not self.get_param_value(FocusStabilizerParams.TRACKING_ENABLED),
+            param,
+            not self.get_param_value(param),
         )
 
     def start_IR(self):
         '''Starts the IR peak position acquisition and
         creates a file in the current directory.
         '''
-        if FocusStabilizer.instance().file is None:
+        if not FocusStabilizer.instance().is_logging():
             filename = None
             if filename is None:
                 filename, _ = getSaveFileName(
@@ -1079,10 +1192,126 @@ class FocusStabilizerView(Tree):
                 )
 
                 if len(filename) > 0:
-                    FocusStabilizer.instance().file = filename
+                    FocusStabilizer.instance().start_logging(filename)
 
     def stop_IR(self):
         '''Stops the IR peak position acquisition and closes the file.'''
-        if FocusStabilizer.instance().file is not None:
-            FocusStabilizer.instance().file = None
-            FocusStabilizer.instance().num_frames_saved = 0
+        if FocusStabilizer.instance().is_logging():
+            FocusStabilizer.instance().stop_logging()
+
+    def get_config(self) -> dict:
+        '''
+        Get the current configuration as a dictionary.
+
+        Returns
+        -------
+        dict
+            The current configuration dictionary.
+        '''
+        return {
+            'ROIs': FocusStabilizer.instance().roi_manager.get_config(),
+            'Stabilizer': FocusStabilizer.instance().get_config(),
+        }
+
+    def load_config(self, config: dict):
+        '''
+        Load the configuration from a dictionary.
+
+        Parameters
+        ----------
+        config : dict
+            The configuration dictionary.
+
+        Returns
+        -------
+        None
+        '''
+        if 'ROIs' in config:
+            FocusStabilizer.instance().roi_manager.load_config(config['ROIs'])
+
+            self.set_param_value(
+                FocusStabilizerParams.LINE_WIDTH,
+                FocusStabilizer.instance().roi_manager.get_linewidth(),
+            )
+
+        if 'Stabilizer' in config:
+            stabilizer: dict = config['Stabilizer']
+
+            Kp = stabilizer.get('Kp', (1.0,) * 3)
+            Ki = stabilizer.get('Ki', (0.0,) * 3)
+            Kd = stabilizer.get('Kd', (0.0,) * 3)
+            error_th = stabilizer.get('error_th', 0.0)
+            cal_coeff = stabilizer.get('cal_coeff', (1.0,) * 3)
+            inverted = stabilizer.get('inverted', (False,) * 3)
+
+            for axis in Axis:
+                self.set_param_value(
+                    FocusStabilizerParams(f'{axis.name}.K_P'),
+                    float(Kp[axis.axis_index()]),
+                )
+                self.set_param_value(
+                    FocusStabilizerParams(f'{axis.name}.K_I'),
+                    float(Ki[axis.axis_index()]),
+                )
+                self.set_param_value(
+                    FocusStabilizerParams(f'{axis.name}.K_D'),
+                    float(Kd[axis.axis_index()]),
+                )
+                self.set_param_value(
+                    FocusStabilizerParams(f'Calibration ({axis.name}) [pixel/nm]'),
+                    float(cal_coeff[axis.axis_index()]),
+                )
+                self.set_param_value(
+                    FocusStabilizerParams(f'{axis.name}.Inverted'), bool(inverted)
+                )
+
+            method = stabilizer.get('method', StabilizationMethods.REFLECTION.value)
+            rejection_method = stabilizer.get(
+                'rejection_method', RejectionMethod.NONE.value
+            )
+            rejection_threshold = stabilizer.get('rejection_threshold', 2.0)
+            rejection_min_points = stabilizer.get('rejection_min_points', 4)
+
+            self.set_param_value(
+                FocusStabilizerParams.USE_CAL, bool(stabilizer.get('use_cal'))
+            )
+            self.set_param_value(FocusStabilizerParams.FT_ERROR_TH, float(error_th))
+            self.set_param_value(
+                FocusStabilizerParams.STABILIZATION_METHOD, StabilizationMethods(method)
+            )
+            self.set_param_value(
+                FocusStabilizerParams.XY_OUTLIER_REJECTION_METHOD,
+                RejectionMethod(rejection_method),
+            )
+            self.set_param_value(
+                FocusStabilizerParams.XY_OUTLIER_REJECTION_THRESHOLD,
+                float(rejection_threshold),
+            )
+            self.set_param_value(
+                FocusStabilizerParams.XY_OUTLIER_REJECTION_MIN_POINTS,
+                int(rejection_min_points),
+            )
+
+    def export_config(self):
+        '''
+        Save the current configuration to a JSON file.
+        '''
+        filename, _ = getSaveFileName(
+            self, 'Save Focus Stabilizer Config', filter='JSON Files (*.json)'
+        )
+        if filename:
+            config = self.get_config()
+            with open(filename, 'w') as f:
+                json.dump(config, f, indent=4)
+
+    def import_config(self):
+        '''
+        Load the configuration from a JSON file.
+        '''
+        filename, _ = getOpenFileName(
+            self, 'Load Focus Stabilizer Config', filter='JSON Files (*.json)'
+        )
+        if filename:
+            with open(filename) as f:
+                config = json.load(f)
+                self.load_config(config)

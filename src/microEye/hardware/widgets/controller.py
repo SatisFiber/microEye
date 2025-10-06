@@ -14,7 +14,7 @@ class Controller(QtWidgets.QDockWidget):
     stage_stop_requested = Signal(Axis)
     stage_home_requested = Signal(Axis)
     stage_center_requested = Signal(Axis)
-    stage_toggle_lock = Signal(str)
+    stage_toggle_lock = Signal(Axis)
 
     def __init__(self):
         ''' '''
@@ -61,6 +61,9 @@ class Controller(QtWidgets.QDockWidget):
         self.btn_xy_center = QtWidgets.QPushButton('🎯')
         self.btn_xy_center.setToolTip('Move to center position')
 
+        self.btn_xy_toggle_stabilizer = QtWidgets.QPushButton('🔓')
+        self.btn_xy_toggle_stabilizer.setToolTip('Toggle XY-axis stabilizer')
+
         # Set size policies and styling
         for btn in [
             self.btn_y_up,
@@ -73,6 +76,7 @@ class Controller(QtWidgets.QDockWidget):
             self.btn_x_right_fine,
             self.btn_xy_stop,
             self.btn_xy_center,
+            self.btn_xy_toggle_stabilizer,
         ]:
             btn.setFixedSize(50, 50)
             btn.setStyleSheet('''
@@ -97,6 +101,7 @@ class Controller(QtWidgets.QDockWidget):
         xy_layout.addWidget(self.btn_xy_stop, 2, 2)
 
         xy_layout.addWidget(self.btn_xy_center, 4, 4)
+        xy_layout.addWidget(self.btn_xy_toggle_stabilizer, 4, 0)
 
         xy_group.setLayout(xy_layout)
 
@@ -189,6 +194,9 @@ class Controller(QtWidgets.QDockWidget):
         self.btn_xy_center.clicked.connect(
             lambda: self.stage_center_requested.emit(Axis.X)
         )
+        self.btn_xy_toggle_stabilizer.clicked.connect(
+            lambda: self.toggle_stabilizer(Axis.X)
+        )
 
         # Z movements
         self.btn_z_up.clicked.connect(lambda: self.move_stage(Axis.Z, True, True))
@@ -202,9 +210,11 @@ class Controller(QtWidgets.QDockWidget):
         self.btn_z_center.clicked.connect(
             lambda: self.stage_center_requested.emit(Axis.Z)
         )
-        self.btn_z_toggle_stabilizer.clicked.connect(self.toggle_stabilizer)
+        self.btn_z_toggle_stabilizer.clicked.connect(
+            lambda: self.toggle_stabilizer(Axis.Z)
+        )
 
-    def toggle_stabilizer(self):
+    def toggle_stabilizer(self, axis: Axis):
         '''Toggle the stabilizer lock on the Z-axis. This method emits a signal to
         request the toggling of the stabilizer lock.
 
@@ -212,9 +222,9 @@ class Controller(QtWidgets.QDockWidget):
         -------
         None
         '''
-        self.stage_toggle_lock.emit(Axis.Z)
+        self.stage_toggle_lock.emit(axis)
 
-    def set_stabilizer_lock(self, lock: bool):
+    def set_stabilizer_lock(self, lock: bool, axis: Axis):
         '''Set the stabilizer lock state on the Z-axis. This method updates the
         button icon and tooltip based on the lock state.
 
@@ -227,7 +237,10 @@ class Controller(QtWidgets.QDockWidget):
         -------
         None
         '''
-        self.btn_z_toggle_stabilizer.setText('🔒' if lock else '🔓')
+        if axis == Axis.Z:
+            self.btn_z_toggle_stabilizer.setText('🔒' if lock else '🔓')
+        else:
+            self.btn_xy_toggle_stabilizer.setText('🔒' if lock else '🔓')
 
     def move_stage(self, axis: Axis, direction: bool, coarse: bool):
         self.stage_move_requested.emit(

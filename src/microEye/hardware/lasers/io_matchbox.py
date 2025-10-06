@@ -212,7 +212,7 @@ class io_combiner(QtCore.QObject):
                 try:
                     self.ser.reset_input_buffer()
 
-                    start_time = time.time()
+                    start_time = time.monotonic()
                     self.ser.write(command)
 
                     response = []
@@ -224,7 +224,7 @@ class io_combiner(QtCore.QObject):
                             .strip()
                         )
                     elapsed_time = (
-                        time.time() - start_time
+                        time.monotonic() - start_time
                     ) * 1000  # Convert to milliseconds
                     if log_print:
                         rx = response[0] if len(response) == 1 else '...'

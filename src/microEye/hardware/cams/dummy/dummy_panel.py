@@ -133,7 +133,7 @@ class Dummy_Panel(Camera_Panel):
 
                 self._buffer.put(
                     self._cam.get_dummy_image_from_pattern(
-                        self.acq_job.frames_captured / 100
+                        cycle_time * 1e-9
                     ).tobytes()
                 )
                 # add sensor temperature to the stack

@@ -994,6 +994,9 @@ class basler_cam(miCamera):
         if res.GrabSucceeded():
             return res.GetArray()
 
+    def snap_image(self):
+        return self.GrabOne()
+
     def RetrieveResult(self, timeout: int) -> Optional[pylon.GrabResult]:
         '''Retrieve the result of the grabbing
 

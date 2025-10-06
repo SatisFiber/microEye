@@ -1,4 +1,5 @@
 import ctypes
+import time
 from enum import Enum
 from typing import Any, Optional, Union
 
@@ -99,7 +100,6 @@ class miCamera:
         '''
         pass
 
-
     def populate_status(self):
         pass
 
@@ -135,7 +135,7 @@ class miCamera:
         pass
 
     def get_metadata(self) -> dict[str, Any]:
-        '''
+        """
         Get the metadata for the camera.
 
         Returns
@@ -152,7 +152,7 @@ class miCamera:
             'DET_SERIAL': '123456789',
             'DET_TYPE': 'CMOS',
         }
-        '''
+        """
         return {
             'CHANNEL_NAME': 'NA',
             'DET_MANUFACTURER': 'NA',
@@ -172,6 +172,17 @@ class miCamera:
             A list of dictionaries containing camera information.
         '''
         return []
+
+    def snap_image(self) -> np.ndarray:
+        '''
+        Snap a single image from the camera.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D numpy array representing the snapped image.
+        '''
+        return np.zeros((self.height, self.width), dtype=np.uint16)
 
 
 class DummyParams(Enum):
@@ -194,6 +205,7 @@ class DummyParams(Enum):
     FLUX = 'Acquisition Settings.Flux'
     PATTERN_TYPE = 'Acquisition Settings.Pattern Type'
     PATTERN_OFFSET = 'Acquisition Settings.Pattern Offset'
+
     PATTERN_SINUSOIDAL = 'Acquisition Settings.Sinusoidal Pattern'
     SINUSOIDAL_FREQUENCY = 'Acquisition Settings.Sinusoidal Pattern.Frequency'
     SINUSOIDAL_PHASE = 'Acquisition Settings.Sinusoidal Pattern.Phase'
@@ -209,6 +221,15 @@ class DummyParams(Enum):
     DRIFT_SIGMA_X = DRIFT_SIM + r'.$\sigma_x$ [pixels]'
     DRIFT_SIGMA_Y = DRIFT_SIM + r'.$\sigma_y$ [pixels]'
     DRIFT_AMPLITUDE = DRIFT_SIM + '.Amplitude'
+
+    ASTIGMATIC_FIDUCIALS = 'Acquisition Settings.Astigmatic Fiducials'
+    AF_X_PERIOD = ASTIGMATIC_FIDUCIALS + '.X Drift Period [Hz]'
+    AF_Y_PERIOD = ASTIGMATIC_FIDUCIALS + '.Y Drift Period [Hz]'
+    AF_Z_PERIOD = ASTIGMATIC_FIDUCIALS + '.Z Range [Hz]'
+    AF_XY_DRIFT = ASTIGMATIC_FIDUCIALS + '.Max XY Drift [pixels]'
+    AF_Z_RANGE = ASTIGMATIC_FIDUCIALS + '.Max Z Range [nm]'
+    AF_NOISE = ASTIGMATIC_FIDUCIALS + '.Position Noise [pixels]'
+    AF_FIDUCIALS = ASTIGMATIC_FIDUCIALS + '.Number of Fiducials'
 
     SM = 'Acquisition Settings.Single Molecule Sim'
     SM_INTENSITY = SM + '.Intensity [photons/loc]'
@@ -228,6 +249,14 @@ class DummyParams(Enum):
         Return the full parameter path.
         '''
         return self.value.split('.')
+
+
+class PatternType(Enum):
+    CONSTANT_FLUX = 'Constant Flux'
+    SINUSOIDAL = 'Sinusoidal'
+    GAUSSIAN = 'Gaussian'
+    ASTIGMATIC_FIDUCIALS = 'Astigmatic Fiducials'
+    SINGLE_MOLECULES = 'Single Molecule Simulation'
 
 
 class miDummy(miCamera):
@@ -258,7 +287,7 @@ class miDummy(miCamera):
         self.readout_noise = kwargs.get('readout_noise', 2.1)
         self.noise_baseline = kwargs.get('noise_baseline', 5)
         self.flux = kwargs.get('flux', 0)
-        self.pattern_type = kwargs.get('pattern_type', 'Sinusoidal')
+        self.__pattern_type = kwargs.get('pattern_type', PatternType.SINUSOIDAL)
         self.pattern_offset = kwargs.get('pattern_offset', 0)
 
         # Sinusoidal pattern parameters
@@ -288,6 +317,15 @@ class miDummy(miCamera):
         self.drift_sigma_x = 5
         self.drift_sigma_y = 20
         self.drift_amplitude = 5000
+
+        # Astigmatic fiducials parameters
+        self.af_x_period = np.e * 3
+        self.af_y_period = 3
+        self.af_z_period = np.pi * 3
+        self.af_xy_drift = 1.0
+        self.af_z_range = 100
+        self.af_noise = 0.1
+        self.af_fiducials = 5
 
         self.__roi = None
         self._meshes = None
@@ -339,6 +377,27 @@ class miDummy(miCamera):
             self.update_meshes()
             if self.__roi:
                 self.set_roi(*self.__roi)
+
+    @property
+    def pattern_type(self) -> PatternType:
+        return self.__pattern_type
+
+    @pattern_type.setter
+    def pattern_type(self, value):
+        if isinstance(value, str):
+            try:
+                value = PatternType(value)
+            except ValueError:
+                value = PatternType.SINUSOIDAL
+        self.__pattern_type = value
+
+        self.drift_center_x = (
+            0.0 if value == PatternType.ASTIGMATIC_FIDUCIALS else self.width // 2
+        )
+        self.drift_center_y = (
+            0.0 if value == PatternType.ASTIGMATIC_FIDUCIALS else self.height // 2
+        )
+        self.drift_center_z = 0.0
 
     def update_meshes(self):
         x = np.arange(self.width)
@@ -594,9 +653,7 @@ class miDummy(miCamera):
     def get_astigmatic_fiducials_pattern(
         self,
         time: float,
-        center_x: Optional[float] = None,
-        center_y: Optional[float] = None,
-        center_z: Optional[float] = None,
+        **kwargs,
     ):
         '''
         Generate astigmatic fiducial markers for the flux array.
@@ -621,77 +678,134 @@ class miDummy(miCamera):
             A 2D numpy array representing the astigmatic fiducial markers.
         '''
 
-        drift = [self.get_drift(time) for _ in range(3)]
+        X_PERIOD = kwargs.get('X_PERIOD', self.af_x_period)
+        Y_PERIOD = kwargs.get('Y_PERIOD', self.af_y_period)
+        Z_PERIOD = kwargs.get('Z_PERIOD', self.af_z_period)
 
-        if center_x is None:
-            drift_amount = drift[0]
+        max_xy_shift = kwargs.get(
+            'xy_drift', self.af_xy_drift
+        )  # max XY drift for scaling
+        max_z_drift = kwargs.get('z_range', self.af_z_range)  # max Z range for scaling
+        noise = kwargs.get('noise', self.af_noise)  # noise to add to fiducial positions
 
-            # Update drift center with bounds checking
-            self.drift_center_x += drift_amount * 0.1
-            edge_margin = max(10, self.width // 10)
-            if self.drift_center_x < edge_margin:
-                self.drift_center_x = edge_margin
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-            elif self.drift_center_x > self.width - edge_margin:
-                self.drift_center_x = self.width - edge_margin
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-
-            center_x = self.drift_center_x
-        if center_y is None:
-            drift_amount = drift[1]
-            self.drift_center_y += drift_amount * 0.1
-            edge_margin = max(10, self.height // 10)
-            if self.drift_center_y < edge_margin:
-                self.drift_center_y = edge_margin
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-            elif self.drift_center_y > self.height - edge_margin:
-                self.drift_center_y = self.height - edge_margin
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-            center_y = self.drift_center_y
-        if center_z is None:
-            drift_amount = drift[2]
-            self.drift_center_z += drift_amount * 10  # Z drift is faster
-
-            if self.drift_center_z < -400:
-                self.drift_center_z = -400
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-            elif self.drift_center_z > 400:
-                self.drift_center_z = 400
-                self.drift_current_velocity *= -0.1  # Bounce back with damping
-
-            center_z = self.drift_center_z
+        drift = [
+            np.sin(time / X_PERIOD * 2 * np.pi) * max_xy_shift,
+            np.sin(time / Y_PERIOD * 2 * np.pi) * max_xy_shift,
+            # Z is triangular wave between -z_range to +z_range
+            (
+                np.abs(np.mod(time, Z_PERIOD) / Z_PERIOD * 2 - 1) * max_z_drift
+                - max_z_drift / 2
+            ),
+        ]
 
         # convert center Z to sigma x and y
-        sigma_0 = 3  # at Z = 0
-        sigma_ratio_min = 0.25  # at Z min
-        sigma_ratio_max = 4.0  # at Z max
+        sigma_x, sigma_y = self._get_astigmatic_sigma(drift[2])
+
+        if self.drift_fiducials is None:
+            # generate random X Y points for the fiducials
+            self.drift_fiducials = np.random.normal(
+                loc=[self.width // 2, self.height // 2],
+                scale=[75, 75],
+                size=(self.af_fiducials, 2),
+            )
+            self.drift_fiducials[:, 0] = np.clip(
+                self.drift_fiducials[:, 0], 0, self.width
+            )
+            self.drift_fiducials[:, 1] = np.clip(
+                self.drift_fiducials[:, 1], 0, self.height
+            )
+
+        return self._get_fiducials(
+            self.drift_fiducials,
+            sigma_x,
+            sigma_y,
+            noise=noise,
+            drift=drift,
+        )
+
+    def _get_astigmatic_sigma(self, z: float, sigma_0=4, **kwargs):
+        '''
+        Convert axial position (z) to astigmatic sigma values.
+
+        Parameters
+        ----------
+        z : float
+            The axial position.
+        sigma_0 : float, optional
+            The base sigma value at z = 0 (default is 4).
+        z_range : float, optional
+            The range of z values for scaling (default is 400).
+
+        Returns
+        -------
+        tuple
+            A tuple containing the sigma_x and sigma_y values.
+        '''
+        ratio_min = kwargs.get('ratio_min', 0.5)  # at Z min
+        ratio_max = kwargs.get('ratio_max', 2.0)  # at Z max
+        z_range = kwargs.get('z_range', 400)  # max Z range for scaling
         sigma_ratio = np.interp(
-            self.drift_center_z, [-400, 0, 400], [sigma_ratio_min, 1, sigma_ratio_max]
+            z, [-z_range, 0, z_range], [ratio_min, 1, ratio_max]
         )  # sigma x / y
         sigma_x = sigma_0 if sigma_ratio >= 1 else sigma_0 * sigma_ratio
         sigma_y = sigma_0 if sigma_ratio <= 1 else sigma_0 / sigma_ratio
+
+        return sigma_x, sigma_y
+
+    def _get_fiducials(
+        self, fiducials: np.ndarray, sigma_x: float, sigma_y: float, **kwargs
+    ):
+        '''
+        Generate a Gaussian representation of fiducials.
+
+        Parameters
+        ----------
+        fiducials : ndarray
+            An array of shape (N, 2) representing the (x, y) coordinates of N fiducials.
+        sigma_x : float
+            The standard deviation in the x direction.
+        sigma_y : float
+            The standard deviation in the y direction.
+        kwargs : dict
+            Additional keyword arguments.
+            - noise : float, optional
+                The amount of noise to add to the fiducial positions (default is 0).
+            - drift : list, optional
+                A list of [drift_x, drift_y, drift_z] to apply to the fiducial positions
+                (default is [0, 0, 0]).
+
+        Returns
+        -------
+        ndarray
+            A 2D numpy array representing the Gaussian representation of the fiducials.
+        '''
+        noise = kwargs.get('noise', 0)  # noise to add to fiducial positions
+        drift = kwargs.get('drift', [0, 0, 0])  # drift in x, y, z
+        kernel_size = int(6 * max(sigma_x, sigma_y)) | 1  # odd size, covers >99% of PSF
 
         x = np.arange(self.width)
         y = np.arange(self.height)
         X, Y = np.meshgrid(x, y)
 
-        if self.drift_fiducials is None:
-            # generate random X Y points for the fiducials
-            self.drift_fiducials = np.random.normal(
-                loc=[center_x, center_y], scale=[50, 50], size=(5, 2)
-            )
+        pattern = np.zeros((self.width, self.height), dtype=np.float64)
 
-        pattern = self.drift_amplitude * np.exp(
-            -((X - center_x) ** 2) / (2 * sigma_x**2)
-            - ((Y - center_y) ** 2) / (2 * sigma_y**2)
-        )
-
-        for fid in self.drift_fiducials:
+        ax, ay = 1 / (2 * sigma_x**2), 1 / (2 * sigma_y**2)
+        for fid in fiducials:
             x = fid[0]
             y = fid[1]
 
-            pattern += self.drift_amplitude * np.exp(
-                -((X - x) ** 2) / (2 * sigma_x**2) - ((Y - y) ** 2) / (2 * sigma_y**2)
+            x += drift[0] + (np.random.random_sample() - 0.5) * noise
+            y += drift[1] + (np.random.random_sample() - 0.5) * noise
+            x_slice = slice(
+                int(max(x - kernel_size, 0)), int(min(x + kernel_size, self.width))
+            )
+            y_slice = slice(
+                int(max(y - kernel_size, 0)), int(min(y + kernel_size, self.height))
+            )
+
+            pattern[y_slice, x_slice] += self.drift_amplitude * np.exp(
+                -((X[y_slice, x_slice] - x) ** 2) * ax
+                - ((Y[y_slice, x_slice] - y) ** 2) * ay
             )
 
         if pattern.min() < 0:
@@ -720,7 +834,7 @@ class miDummy(miCamera):
             A 2D numpy array representing the dummy image
             with added noise and CMOS conversion.
         '''
-        if self.pattern_type.lower() == 'sinusoidal':
+        if self.pattern_type == PatternType.SINUSOIDAL:
             flux = self.get_sinus_diagonal_pattern(
                 time,
                 self.sinusoidal_amplitude,
@@ -729,16 +843,19 @@ class miDummy(miCamera):
                 self.pattern_offset,
                 self.sinusoidal_direction,
             )
-        elif self.pattern_type.lower() == 'single molecule sim':
+        elif self.pattern_type == PatternType.SINGLE_MOLECULES:
             flux = 0
-        elif self.pattern_type.lower() == 'gaussian':
+        elif self.pattern_type == PatternType.GAUSSIAN:
             flux = self.get_gaussian_beam_pattern(time, center_x=None, center_y=None)
-        elif self.pattern_type.lower() == 'astigmatic fiducials':
+        elif self.pattern_type == PatternType.ASTIGMATIC_FIDUCIALS:
             flux = self.get_astigmatic_fiducials_pattern(time)
         else:
             flux = self.flux
 
         return self.get_dummy_image(flux)
+
+    def snap_image(self):
+        return self.get_dummy_image_from_pattern(time.monotonic_ns() * 1e-9)
 
     def get_metadata(self) -> dict[str, Any]:
         return {
@@ -821,14 +938,8 @@ class miDummy(miCamera):
         PATTERN_TYPE = {
             'name': str(DummyParams.PATTERN_TYPE),
             'type': 'list',
-            'limits': [
-                'Constant Flux',
-                'Sinusoidal',
-                'Gaussian',
-                'Astigmatic Fiducials',
-                'Single Molecule Sim',
-            ],
-            'value': 'Sinusoidal',
+            'limits': [e.value for e in PatternType],
+            'value': self.pattern_type.value,
         }
         PATTERN_OFFSET = {
             'name': str(DummyParams.PATTERN_OFFSET),
@@ -951,7 +1062,51 @@ class miDummy(miCamera):
                     'name': str(DummyParams.DRIFT_AMPLITUDE),
                     'type': 'float',
                     'value': 5000,
-                }
+                },
+            ],
+        }
+
+        # Astigmatic fiducials parameters
+        AF_SIM = {
+            'name': str(DummyParams.ASTIGMATIC_FIDUCIALS),
+            'type': 'group',
+            'expanded': False,
+            'children': [
+                {
+                    'name': str(DummyParams.AF_X_PERIOD),
+                    'type': 'float',
+                    'value': self.af_x_period,
+                },
+                {
+                    'name': str(DummyParams.AF_Y_PERIOD),
+                    'type': 'float',
+                    'value': self.af_y_period,
+                },
+                {
+                    'name': str(DummyParams.AF_Z_PERIOD),
+                    'type': 'float',
+                    'value': self.af_z_period,
+                },
+                {
+                    'name': str(DummyParams.AF_XY_DRIFT),
+                    'type': 'float',
+                    'value': self.af_xy_drift,
+                },
+                {
+                    'name': str(DummyParams.AF_Z_RANGE),
+                    'type': 'float',
+                    'value': self.af_z_range,
+                },
+                {
+                    'name': str(DummyParams.AF_NOISE),
+                    'type': 'float',
+                    'value': self.af_noise,
+                },
+                {
+                    'name': str(DummyParams.AF_FIDUCIALS),
+                    'type': 'int',
+                    'value': self.af_fiducials,
+                },
             ],
         }
 
@@ -972,7 +1127,8 @@ class miDummy(miCamera):
             PATTERN_OFFSET,
             PATTERN_SINUSOIDAL,
             DRIFT_SIM,
-            SM_SIM
+            AF_SIM,
+            SM_SIM,
         ]
 
     def update_cam(self, param, path, param_value):
@@ -1051,6 +1207,22 @@ class miDummy(miCamera):
             self.drift_sigma_y = param_value
         elif param_name == DummyParams.DRIFT_AMPLITUDE:
             self.drift_amplitude = param_value
+
+        elif param_name == DummyParams.AF_X_PERIOD:
+            self.af_x_period = param_value
+        elif param_name == DummyParams.AF_Y_PERIOD:
+            self.af_y_period = param_value
+        elif param_name == DummyParams.AF_Z_PERIOD:
+            self.af_z_period = param_value
+        elif param_name == DummyParams.AF_XY_DRIFT:
+            self.af_xy_drift = param_value
+        elif param_name == DummyParams.AF_Z_RANGE:
+            self.af_z_range = param_value
+        elif param_name == DummyParams.AF_NOISE:
+            self.af_noise = param_value
+        elif param_name == DummyParams.AF_FIDUCIALS:
+            self.af_fiducials = param_value
+            self.drift_fiducials = None  # reset fiducials to generate new ones
 
     @classmethod
     def get_camera_list(cls):

@@ -168,10 +168,9 @@ class DeviceManager(QtCore.QObject):
         StageManager.instance().center(axis)
 
     def toggleLock(self, axis: Axis):
-        if axis == Axis.Z:
-            widget: focusWidget = DeviceManager.WIDGETS.get(DEVICES.FocusStabilizer)
-            if widget:
-                widget.focusStabilizerView.toggleFocusStabilization()
+        widget: focusWidget = DeviceManager.WIDGETS.get(DEVICES.FocusStabilizer)
+        if widget:
+            widget.focusStabilizerView.toggleFocusStabilization(axis)
 
     def moveRequest(self, axis: Axis, direction: bool, jump: bool, snap_image=False):
         """

@@ -1098,6 +1098,11 @@ class vimba_cam(miCamera):
         self.cam.Width.set(self.width_max)
         self.cam.Height.set(self.height_max)
 
+    def snap_image(self):
+        with self:
+            for frame in self.cam.get_frame_generator(1, timeout_ms=1000):
+                return frame.as_numpy_ndarray().squeeze()
+
     def get_nearest(self, vrange, step, value):
         values = np.arange(vrange[0], vrange[1] + step / 4, step)
         return values[np.abs(values - value).argmin()]

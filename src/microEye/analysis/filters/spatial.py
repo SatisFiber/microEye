@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Optional
 
 import cv2
+import numba as nb
 import numpy as np
 from scipy import signal
 from scipy.fftpack import fft2, fftshift, ifft2, ifftshift
@@ -64,22 +65,8 @@ class DoG_Filter(SpatialFilter):
         return kernel
 
     def run(self, image: np.ndarray) -> np.ndarray:
-        rows, cols = image.shape
-        nrows = cv2.getOptimalDFTSize(rows)
-        ncols = cv2.getOptimalDFTSize(cols)
-        pad_rows = nrows - rows
-        pad_cols = ncols - cols
-
-        # Ensure that pad_cols[1] and pad_rows[1] are at least 1
-        pad_rows = (pad_rows // 2, max(1, pad_rows - pad_rows // 2))
-        pad_cols = (pad_cols // 2, max(1, pad_cols - pad_cols // 2))
-
-        nimg = np.pad(image, (pad_rows, pad_cols), mode='reflect')
-
         res = cv2.normalize(
-            signal.convolve2d(nimg, np.rot90(self.dog), mode='same')[
-                pad_rows[0] : -pad_rows[1], pad_cols[0] : -pad_cols[1]
-            ],
+            signal.fftconvolve(image, np.rot90(self.dog), mode='same'),
             None,
             0,
             255,
@@ -140,16 +127,14 @@ class PointGaussFilter(SpatialFilter):
         return kernel
 
     def run(self, image: np.ndarray) -> np.ndarray:
-        point = signal.fftconvolve(image, np.rot90(self.point_kernel), mode='same')
-
-        return cv2.normalize(
-            signal.fftconvolve(point, np.rot90(self.gauss), mode='same'),
-            None,
-            0,
-            255,
-            cv2.NORM_MINMAX,
-            cv2.CV_8U,
+        # precompute combined kernel if possible
+        _combined_kernel = signal.convolve2d(
+            np.rot90(self.gauss), np.rot90(self.point_kernel), mode='full'
         )
+
+        point = signal.fftconvolve(image, np.rot90(_combined_kernel), mode='same')
+
+        return cv2.normalize(point, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
 
     def get_tree_parameters(self):
         '''Return the parameters for the pyqtgraph tree view.'''
@@ -169,6 +154,30 @@ class PointGaussFilter(SpatialFilter):
                 },
             ],
         }
+
+
+@nb.njit(parallel=True)
+def radial_coordinates_nb(shape):
+    '''Generates a 2D array with radial cordinates
+    with according to the first two axis of the
+    supplied shape tuple
+
+    Returns
+    -------
+    R, Rsq
+        Radius 2d matrix (R) and radius squared matrix (Rsq)
+    '''
+    R = np.zeros(shape, dtype=np.float32)
+    Rsq = np.zeros(shape, dtype=np.float32)
+
+    center = (shape[0] // 2, shape[1] // 2)
+
+    for i in nb.prange(shape[0]):
+        for j in range(shape[1]):
+            R[i, j] = np.sqrt((i - center[0]) ** 2 + (j - center[1]) ** 2)
+            Rsq[i, j] = R[i, j] ** 2
+
+    return R, Rsq
 
 
 class FourierFilter(SpatialFilter):
@@ -241,14 +250,7 @@ class FourierFilter(SpatialFilter):
         R, Rsq
             Radius 2d matrix (R) and radius squared matrix (Rsq)
         '''
-        y_len = np.arange(-shape[0] // 2, shape[0] // 2)
-        x_len = np.arange(-shape[1] // 2, shape[1] // 2)
-
-        X, Y = np.meshgrid(x_len, y_len)
-
-        Rsq = X**2 + Y**2
-
-        self._radial_coordinates = (np.sqrt(Rsq), Rsq)
+        self._radial_coordinates = radial_coordinates_nb(shape[:2])
 
         return self._radial_coordinates
 

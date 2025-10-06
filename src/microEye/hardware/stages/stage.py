@@ -1,9 +1,10 @@
+import traceback
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Callable, Optional, Union
 
-from microEye.hardware.stages.stabilizer import FocusStabilizer
 from microEye.qt import QtCore, QtSerialPort, Signal
+from microEye.utils.thread_worker import QThreadWorker
 
 
 class Axis(Enum):
@@ -20,6 +21,17 @@ class Axis(Enum):
         Return the last part of the enum value (Axis name).
         '''
         return self.value.split('.')[-1]
+
+    def axis_index(self) -> int:
+        '''
+        Return the index of the axis (0 for X, 1 for Y, 2 for Z).
+
+        Returns
+        -------
+        int
+            The index of the axis.
+        '''
+        return {'X': 0, 'Y': 1, 'Z': 2}[self.value]
 
     @classmethod
     def from_string(cls, axis_str: str):
@@ -53,7 +65,7 @@ class Units(Enum):
     MICROMETERS = 1000  # 1 um = 1000 nm
     MILLIMETERS = 1000000  # 1 mm = 1,000,000 nm
 
-    SLIDES_PIXELS  = 100000
+    SLIDES_PIXELS = 100000
 
     def suffix(self) -> str:
         '''
@@ -556,10 +568,36 @@ class AbstractStage(ABC):
 
         self._metadata[axis]['max'] = max_range
 
-    @property
-    def busy(self) -> bool:
+    def is_busy(self) -> bool:
         '''Return True if the stage is currently busy.'''
         return self._busy
+
+    def run_async(self, callback, *args, is_async=True, **kwargs):
+        if self.is_open() and not self.is_busy():
+            prior = kwargs.get('prior')
+            if prior is not None and callable(prior):
+                prior()
+
+            def worker_callback():
+                try:
+                    self._busy = True
+                    self.signals.asyncStarted.emit()
+                    callback(*args)
+                    wait = kwargs.get('wait_func')
+                    if wait is not None and callable(wait):
+                        wait()
+                except Exception as e:
+                    traceback.print_exc()
+                finally:
+                    self._busy = False
+                    self.signals.asyncFinished.emit()
+
+            if is_async:
+                _worker = QThreadWorker(worker_callback, nokwargs=True)
+
+                QtCore.QThreadPool.globalInstance().start(_worker)
+            else:
+                worker_callback()
 
     @property
     def driver(self) -> StageDriver:

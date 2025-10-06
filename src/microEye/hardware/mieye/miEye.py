@@ -446,9 +446,6 @@ class miEye_module(QMainWindow):
                 )
                 self.tabifyDockWidget(self.lasersDock, self.cam_dock)
                 self.cam_dock.raise_()  # Bring to front
-                self.device_manager.focus.graph_IR.setLabel(
-                    'left', 'Signal', '', **self.labelStyle
-                )
 
             else:
                 if self.ir_array_dock is None:
@@ -466,9 +463,6 @@ class miEye_module(QMainWindow):
 
                 self.ir_array_dock.setWidget(widget)
                 self.ir_array_dock.raise_()  # Bring to front
-                self.device_manager.focus.graph_IR.setLabel(
-                    'left', 'Signal', 'V', **self.labelStyle
-                )
 
         elif device == DEVICES.STAGE:
             self.stagesWidget.insertTab(0, widget, str(widget.stage.NAME))

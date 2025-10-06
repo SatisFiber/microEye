@@ -80,13 +80,12 @@ CAMERA_CONFIGS = {
     },
 }
 
-class CameraList(QtWidgets.QWidget):
+# singleton camera manager class
+class CameraManager(QtCore.QObject):
     '''
-    A widget for displaying and managing a list of cameras.
+    A singleton class to manage camera instances.
     '''
-
-    cameraAdded = Signal(Camera_Panel, bool)
-    cameraRemoved = Signal(Camera_Panel, bool)
+    _instance = None
 
     CAMERAS : dict[str, list[dict]] = {
         'Basler': [],
@@ -96,6 +95,62 @@ class CameraList(QtWidgets.QWidget):
         'uEye': [],
         'Vimba': [],
     }
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super().__new__(cls, *args, **kwargs)
+        return cls._instance
+
+    @classmethod
+    def instance(cls):
+        if cls._instance is None:
+            return CameraManager()
+
+        return cls._instance
+
+    def __init__(self):
+        super().__init__()
+
+        self.cam_list = None
+        self.cached_autofocusCam = None
+
+    @property
+    def autofocusCam(self) -> typing.Union[Camera_Panel, None]:
+        '''
+        Get the autofocus camera panel.
+
+        Returns
+        -------
+        Camera_Panel | None
+            The autofocus camera panel, or None if no autofocus camera is available.
+        '''
+        if self.cached_autofocusCam is None:
+            self.cached_autofocusCam = next(
+                (
+                    cam['Panel']
+                    for _, cam_list in CameraManager.CAMERAS.items()
+                    for cam in cam_list
+                    if cam['IR']
+                ),
+                None,
+            )
+        return self.cached_autofocusCam
+
+    @classmethod
+    def snap_ir_image(cls):
+        '''
+        Snap an image on the IR camera if available.
+        '''
+        if cls.instance().autofocusCam is not None:
+            return cls.instance().autofocusCam.cam.snap_image()
+
+class CameraList(QtWidgets.QWidget):
+    '''
+    A widget for displaying and managing a list of cameras.
+    '''
+
+    cameraAdded = Signal(Camera_Panel, bool)
+    cameraRemoved = Signal(Camera_Panel, bool)
 
     def __init__(self, parent: typing.Optional['QtWidgets.QWidget'] = None):
         '''
@@ -108,9 +163,10 @@ class CameraList(QtWidgets.QWidget):
         '''
         super().__init__(parent=parent)
 
+        self.__camera_manager = CameraManager.instance()
+
         self.cam_list = None
         self.item_model = QtGui.QStandardItemModel()
-        self.cached_autofocusCam = None
 
         #  Layout
         self.InitLayout()
@@ -172,17 +228,7 @@ class CameraList(QtWidgets.QWidget):
         Camera_Panel | None
             The autofocus camera panel, or None if no autofocus camera is available.
         '''
-        if self.cached_autofocusCam is None:
-            self.cached_autofocusCam = next(
-                (
-                    cam['Panel']
-                    for _, cam_list in CameraList.CAMERAS.items()
-                    for cam in cam_list
-                    if cam['IR']
-                ),
-                None,
-            )
-        return self.cached_autofocusCam
+        return self.__camera_manager.autofocusCam
 
     def add_camera_clicked(self):
         '''
@@ -244,7 +290,6 @@ class CameraList(QtWidgets.QWidget):
         else:
             self._display_warning_message('Device is in use or already added.')
 
-
     def _add_camera_generic(self, cam, mini, config):
         '''
         Generic camera/panel adder.
@@ -277,7 +322,7 @@ class CameraList(QtWidgets.QWidget):
         panel : Camera_Panel = panel_class(*args)
 
         # Add to CAMERAS dict
-        CameraList.CAMERAS[driver].append(
+        CameraManager.CAMERAS[driver].append(
             {'Camera': panel.cam, 'Panel': panel, 'IR': mini, 'Info': cam}
         )
         return panel
@@ -344,7 +389,7 @@ class CameraList(QtWidgets.QWidget):
         cam : dict
             The camera information dictionary.
         '''
-        cams: list[dict] = CameraList.CAMERAS.get(cam['Driver'], [])
+        cams: list[dict] = CameraManager.CAMERAS.get(cam['Driver'], [])
         if cams:
             for item in cams:
                 pan: Camera_Panel = item['Panel']
@@ -377,7 +422,7 @@ class CameraList(QtWidgets.QWidget):
         Remove all cameras.
         Stops any active acquisitions and properly disposes of camera resources.
         '''
-        for _, camera_list in self.CAMERAS.items():
+        for _, camera_list in CameraManager.CAMERAS.items():
             # Create a copy of the list since we'll be modifying it during iteration
             for camera_info in camera_list[:]:
                 panel: Camera_Panel = camera_info['Panel']
@@ -485,14 +530,14 @@ class CameraList(QtWidgets.QWidget):
         self.cam_table.setModel(self.item_model)
 
         # Update the cached_autofocusCam value
-        self.cached_autofocusCam = None
+        self.__camera_manager.cached_autofocusCam = None
 
     @classmethod
     def update_gui(cls):
         '''
         Update the GUI of all added cameras.
         '''
-        for _, cam_list in cls.CAMERAS.items():
+        for _, cam_list in CameraManager.CAMERAS.items():
             for cam in cam_list:
                 cam['Panel'].updateInfo()
 
@@ -500,7 +545,7 @@ class CameraList(QtWidgets.QWidget):
         '''
         Snap an image on all non IR cameras.
         '''
-        for _, cam_list in CameraList.CAMERAS.items():
+        for _, cam_list in CameraManager.CAMERAS.items():
             for cam in cam_list:
                 if not cam['IR']:
                     cam['Panel'].capture_image()
@@ -518,7 +563,7 @@ class CameraList(QtWidgets.QWidget):
         '''
         config : list[dict] = []
 
-        for _, cam_list in CameraList.CAMERAS.items():
+        for _, cam_list in CameraManager.CAMERAS.items():
             for cam in cam_list:
                 cam_config : dict = cam['Info'].copy()
                 cam_config['IR'] = cam['IR']

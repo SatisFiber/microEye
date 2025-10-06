@@ -93,28 +93,14 @@ class KinesisXY(AbstractStage):
         self.X.close()
         self.Y.close()
 
+    def clear_responses(self):
+        self.X.clearResponses()
+        self.Y.clearResponses()
+
     def run_async(self, callback, *args, is_async=True):
-        if self.is_open() and not self._busy:
-            self.X.clearResponses()
-            self.Y.clearResponses()
-
-            def worker_callback():
-                try:
-                    self._busy = True
-                    self.signals.asyncStarted.emit()
-                    callback(*args)
-                except Exception as e:
-                    traceback.print_exc()
-                finally:
-                    self._busy = False
-                    self.signals.asyncFinished.emit()
-
-            if is_async:
-                _worker = QThreadWorker(worker_callback, nokwargs=True)
-
-                QtCore.QThreadPool.globalInstance().start(_worker)
-            else:
-                worker_callback()
+        super().run_async(
+            callback, *args, is_async=is_async, prior=self.clear_responses
+        )
 
     def is_open(self):
         return all([self.X.isOpen(), self.Y.isOpen()])

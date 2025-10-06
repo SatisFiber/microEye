@@ -1483,6 +1483,44 @@ class thorlabs_camera(miCamera):
             self.capture_video = False
         return nRet
 
+    def snap_image(self):
+        if self.acquisition:
+            return None
+
+        image = None
+
+        try:
+            if not self.memory_allocated:
+                self.allocate_memory_buffer()
+
+            self.refresh_info(False)
+            self.acquisition = True
+
+            nRet = self.uc480.is_FreezeVideo(self.hCam, IS_DONT_WAIT)
+            if nRet != CMD.IS_SUCCESS:
+                raise Exception('is_FreezeVideo ERROR')
+
+            nRet = self.wait_for_next_image(500, False)
+
+            if nRet == CMD.IS_SUCCESS:
+                self.get_pitch()
+                data = self.get_data()
+
+                dtype = np.uint8 if self.bytes_per_pixel == 1 else '<u2'
+
+
+
+                image = np.frombuffer(data, dtype=dtype).reshape(
+                    self.height, self.width
+                )
+        except Exception as e:
+            logging.error(f'Exception in snap_image: {e}')
+        finally:
+            self.acquisition = False
+            self.free_memory()
+
+        return image
+
     def get_pitch(self):
         x = c_int()
         y = c_int()

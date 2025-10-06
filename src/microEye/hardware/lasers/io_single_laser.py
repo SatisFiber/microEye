@@ -185,7 +185,7 @@ class io_single_laser(QtCore.QObject):
                 try:
                     self.ser.reset_input_buffer()
 
-                    start_time = time.time()
+                    start_time = time.monotonic()
                     self.ser.write(command)
 
                     response = []
@@ -193,7 +193,7 @@ class io_single_laser(QtCore.QObject):
                         response.append(self.ser.read_until(b'\r\n').decode().strip())
 
                     elapsed_time = (
-                        time.time() - start_time
+                        time.monotonic() - start_time
                     ) * 1000  # Convert to milliseconds
                     if log_print:
                         rx = response[0] if len(response) == 1 else '...'

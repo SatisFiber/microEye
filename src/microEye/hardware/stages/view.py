@@ -390,7 +390,7 @@ class StageView(Tree):
         if port_state is not None:
             port_state.setValue('open' if self.stage.is_open() else 'closed')
 
-        self._update_positions()
+        # self._update_positions()
 
     def _remove_widget(self):
         '''

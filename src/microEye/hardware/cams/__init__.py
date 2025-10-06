@@ -1,5 +1,5 @@
 from microEye.hardware.cams.camera_calibration import dark_calibration
-from microEye.hardware.cams.camera_list import CameraList
+from microEye.hardware.cams.camera_list import CameraList, CameraManager
 from microEye.hardware.cams.camera_panel import Camera_Panel, CamParams
 from microEye.hardware.cams.jobs import AcquisitionJob
 from microEye.hardware.cams.linescan.IR_Cam import (

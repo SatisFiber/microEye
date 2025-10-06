@@ -777,6 +777,19 @@ class pco_cam(miCamera):
         '''
         return self.cam.image(idx, roi, data_format.value, Not_implemented_yet)
 
+    def snap_image(self):
+        '''Snap one image from the camera
+
+        Returns
+        -------
+        np.ndarray
+            The snapped image from the camera
+        '''
+        self.record(1, RecorderModes.RING_BUFFER)
+        self.wait_for_new_image(timeout=0.1)
+
+        return self.get_image(0xFFFFFFFF)[0]
+
     def image_average(
         self,
         roi: Optional[tuple[int, int, int, int]] = None,

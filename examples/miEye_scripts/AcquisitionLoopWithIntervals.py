@@ -1,8 +1,8 @@
-from microEye.hardware.cams import CameraList, Vimba_Panel
+from microEye.hardware.cams import CameraManager, Vimba_Panel
 from microEye.qt import QtCore
 from microEye.utils.thread_worker import QThreadWorker
 
-panel: Vimba_Panel = CameraList.CAMERAS['Vimba'][0]
+panel: Vimba_Panel = CameraManager.CAMERAS['Vimba'][0]
 
 iterations = 5  # number of iterations
 delay = 10  # delay in seconds

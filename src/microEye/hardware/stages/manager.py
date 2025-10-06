@@ -120,9 +120,9 @@ class StageManager(QtCore.QObject):
 
     def is_busy(self, axis: Axis) -> bool:
         if axis == Axis.Z and self.z_stage() is not None:
-            return self.z_stage().busy
+            return self.z_stage().is_busy()
         elif axis in (Axis.X, Axis.Y) and self.xy_stage() is not None:
-            return self.xy_stage().busy
+            return self.xy_stage().is_busy()
         return False
 
     def is_open(self, axis: Axis) -> bool:
@@ -170,13 +170,13 @@ class StageManager(QtCore.QObject):
         focusStabilizer = FocusStabilizer.instance()
         if (
             focusStabilizer is not None
-            and focusStabilizer.isFocusStabilized()
+            and focusStabilizer.isFocusStabilized(Axis.Z)
             and focusStabilizer.useCal()
             and interface
         ):
             sign = 1 if dir else -1
             focusStabilizer.setParameter(
-                focusStabilizer.calCoeff() * step_arg * sign, True
+                focusStabilizer.calCoeff(Axis.Z) * step_arg * sign, True
             )
         else:
             self.z_stage().move_higher(step_arg) if dir else self.z_stage().move_lower(

@@ -7,16 +7,16 @@ The **`microEye`** is a Python toolkit for fluorescence microscopy that supports
 This toolkit is compatible with the [hardware](#hardware) used in our microscope. For further details, refer to the [miEye microscope paper](https://doi.org/10.1016/j.ohx.2022.e00368) and [OSF project](http://doi.org/10.17605/osf.io/j2fqy).
 
 ```bash
-   __  ____              ____                ___  ____  ___       ___ 
-  /  |/  (_)__________  / __/_ _____   _  __|_  |/ / / / _ \___ _|_  |
- / /|_/ / / __/ __/ _ \/ _// // / -_) | |/ / __//_  _// // / _ `/ __/
+   __  ____              ____                ___  ____  ___       ____
+  /  |/  (_)__________  / __/_ _____   _  __|_  |/ / / / _ \___ _|_  /
+ / /|_/ / / __/ __/ _ \/ _// // / -_) | |/ / __//_  _// // / _ `//_ <
 /_/  /_/_/\__/_/  \___/___/\_, /\__/  |___/____(_)_/(_)___/\_,_/____/
                           /___/
-         ___   __     __          ___      __
-        / _ | / /__  / /  ___ _  / _ \___ / /__ ___ ____ ___
-       / __ |/ / _ \/ _ \/ _ `/ / , _/ -_) / -_) _ `(_-</ -_)
-      /_/ |_/_/ .__/_//_/\_,_/ /_/|_|\__/_/\__/\_,_/___/\__/
-             /_/
+                         ___   __     __                         
+                        / _ | / /__  / /  ___ _  
+                       / __ |/ / _ \/ _ \/ _ `/ 
+                      /_/ |_/_/ .__/_//_/\_,_/
+                             /_/
 ```
 
 ![Package Health](https://snyk.io/advisor/python/microEye/badge.svg)

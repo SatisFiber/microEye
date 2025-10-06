@@ -9,7 +9,7 @@ import tabulate
 import tifffile as tf
 
 # Cameras
-from microEye.hardware.cams.camera_list import CameraList
+from microEye.hardware.cams.camera_list import CameraManager
 from microEye.hardware.cams.camera_options import CamParams
 from microEye.hardware.cams.camera_panel import Camera_Panel
 from microEye.hardware.cams.micam import miCamera
@@ -181,7 +181,7 @@ class AcquisitionManager(QtCore.QObject):
             self.scan_worker.stop()
 
     def update_directories(self, value: str):
-        for _, cam_list in CameraList.CAMERAS.items():
+        for _, cam_list in CameraManager.CAMERAS.items():
             for cam in cam_list:
                 panel: Camera_Panel = cam['Panel']
                 panel._directory = value
@@ -223,7 +223,7 @@ def scanAcquisition(steps, step_size, delay, average=1, **kwargs):
         stage_manager = StageManager.instance()
 
         data = []
-        vimba_cams = [cam for cam in CameraList.CAMERAS['Vimba'] if not cam['IR']]
+        vimba_cams = [cam for cam in CameraManager.CAMERAS['Vimba'] if not cam['IR']]
         if stage_manager.is_open(Axis.X) and len(vimba_cams) > 0:
             cam: vimba_cam = vimba_cams[0]['Camera']
             for x in range(steps[0]):
@@ -338,7 +338,7 @@ def z_stack_acquisition(
 
         data = []
         peak = None
-        vimba_cams = [cam for cam in CameraList.CAMERAS['Vimba'] if not cam['IR']]
+        vimba_cams = [cam for cam in CameraManager.CAMERAS['Vimba'] if not cam['IR']]
         if stage_manager.z_stage().is_open() and len(vimba_cams) > 0 and nFrames > 0:
             cam: miCamera = vimba_cams[0]['Camera']
             cam_pan: Camera_Panel = vimba_cams[0]['Panel']
@@ -355,22 +355,26 @@ def z_stack_acquisition(
                         return
 
                     if (
-                        FocusStabilizer.instance().isFocusStabilized()
+                        FocusStabilizer.instance().isFocusStabilized(Axis.Z)
                         and FocusStabilizer.instance().useCal()
                     ):
-                        value = FocusStabilizer.instance().calCoeff() * step_size
+                        value = FocusStabilizer.instance().calCoeff(Axis.Z) * step_size
                         if reverse:
                             value *= -1
                         FocusStabilizer.instance().setParameter(value, True)
                         QtCore.QThread.msleep(delay)
                     else:
-                        if FocusStabilizer.instance().isFocusStabilized():
-                            FocusStabilizer.instance().toggleFocusStabilization(False)
+                        if FocusStabilizer.instance().isFocusStabilized(Axis.Z):
+                            FocusStabilizer.instance().toggleFocusStabilization(
+                                Axis.Z, False
+                            )
                         acquisition_manager.acquisitionWidget.moveZ.emit(
                             reverse, step_size
                         )
                         QtCore.QThread.msleep(delay)
-                        FocusStabilizer.instance().toggleFocusStabilization(True)
+                        FocusStabilizer.instance().toggleFocusStabilization(
+                            Axis.Z, True
+                        )
                 frame = None
                 prefix = f'Z_{x:04d}_'
 
@@ -438,8 +442,8 @@ def z_calibration(
 
         data = []
         if stage_manager.z_stage().is_open():
-            if FocusStabilizer.instance().isFocusStabilized():
-                FocusStabilizer.instance().toggleFocusStabilization(False)
+            if FocusStabilizer.instance().isFocusStabilized(Axis.Z):
+                FocusStabilizer.instance().toggleFocusStabilization(Axis.Z, False)
             for x in range(n):
                 if event and event.is_set():
                     return

@@ -343,8 +343,8 @@ class ParameterAdjustmentAction(BaseAction):
         if self.delay > 0:
             self.output(f'{str(self)}: waiting {self.delay:.3f} secs ...', **kwargs)
             # time.sleep(self.delay)
-            start_time = time.time()
-            while time.time() - start_time < self.delay:
+            start_time = time.monotonic()
+            while time.monotonic() - start_time < self.delay:
                 if event and event.is_set():
                     self.output(
                         f'{str(self)}: Execution stopped during delay.', **kwargs

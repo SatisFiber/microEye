@@ -116,7 +116,7 @@ class PycroCamera(PycroDevice, miCamera):
         tagged = self._core.get_tagged_image()
         return tagged.pix, tagged.tags
 
-    def snap_image(self, buffered=False):
+    def snap_image(self):
         if self.is_sequence_running():
             print('Sequence already running')
             return None
@@ -124,11 +124,11 @@ class PycroCamera(PycroDevice, miCamera):
         self.start_sequence_acquisition(0, 1)
 
         # add timeout to avoid infinite loop
-        start = time.time()
+        start = time.monotonic()
         while self.image_count == 0:
             time.sleep(0.001)
 
-            if time.time() - start > 5:
+            if time.monotonic() - start > 5:
                 print('Timeout: Could not snap image')
                 return None
 

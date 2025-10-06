@@ -512,8 +512,8 @@ class IDS_Camera(miCamera):
             self.rectROI.s32X.value,
             self.rectROI.s32Y.value,
             self.rectROI.s32Width.value,
-            self.rectROI.s32Height.value
-            )
+            self.rectROI.s32Height.value,
+        )
 
     def set_roi(self, x, y, width, height):
         '''Sets the size and position of an
@@ -968,6 +968,44 @@ class IDS_Camera(miCamera):
         else:
             self.capture_video = False
         return nRet
+
+    def snap_image(self):
+        if self.acquisition:
+            return None
+
+        image = None
+
+        try:
+            if not self.memory_allocated:
+                self.allocate_memory_buffer()
+
+            self.refresh_info(False)
+            self.acquisition = True
+
+            nRet = ueye.is_FreezeVideo(self.hCam, ueye.IS_WAIT)
+            if nRet != ueye.IS_SUCCESS:
+                raise Exception('is_FreezeVideo ERROR')
+
+            nRet = self.wait_for_next_image(500, False)
+
+            if nRet == ueye.IS_SUCCESS:
+                self.get_pitch()
+                data = self.get_data()
+
+                dtype = np.uint8 if self.bytes_per_pixel == 1 else '<u2'
+
+
+
+                image = np.frombuffer(data, dtype=dtype).reshape(
+                    self.height, self.width
+                )
+        except Exception as e:
+            logging.error(f'Exception in snap_image: {e}')
+        finally:
+            self.acquisition = False
+            self.free_memory()
+
+        return image
 
     def allocate_memory_buffer(self, buffers: int = 100):
         if len(self.MemInfo) > 0:
