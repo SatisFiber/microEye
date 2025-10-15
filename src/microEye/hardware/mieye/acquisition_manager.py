@@ -28,12 +28,12 @@ from microEye.hardware.widgets.scan_acquisition import (
     TiledImageSelector,
     TileImage,
 )
+from microEye.images.uImage import uImage
 from microEye.qt import (
     QtCore,
     Signal,
 )
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import uImage
 
 
 class AcquisitionManager(QtCore.QObject):

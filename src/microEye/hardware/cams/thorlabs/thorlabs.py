@@ -704,7 +704,7 @@ class thorlabs_camera(miCamera):
                             'InUse': pucl.uci[index].dwInUse,
                             'Model': pucl.uci[index].Model.decode('utf-8'),
                             'Serial': pucl.uci[index].SerNo.decode('utf-8'),
-                            'Driver': 'Thorlabs DCx UC480',
+                            'Driver': 'UC480',
                         }
                     )
                 if output:
@@ -825,8 +825,8 @@ class thorlabs_camera(miCamera):
         self.status['Exposure'] = {
             'Value': self.exposure_current.value,
             'Unit': 'ms',
-            'Range': [self.exposure_range[0].value, self.exposure_range[1].value],
-            'Increment': self.exposure_range[2].value,
+            'Range': [self.exposure_range[0], self.exposure_range[1]],
+            'Increment': self.exposure_range[2],
         }
 
         self.status['Framerate'] = {
@@ -1595,7 +1595,7 @@ class thorlabs_camera(miCamera):
         PIXEL_CLOCK = {
             'name': str(ThorCamParams.PIXEL_CLOCK),
             'type': 'list',
-            'limits': list(map(str, self._cam.pixel_clock_list[:])),
+            'limits': list(map(str, self.pixel_clock_list[:])),
         }
         FRAMERATE = {
             'name': str(ThorCamParams.FRAMERATE),

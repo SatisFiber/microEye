@@ -8,10 +8,10 @@ import numba as nb
 import numpy as np
 import tifffile as tf
 
+from microEye.images import TiffSeqHandler, ZarrImageSequence, uImage
 from microEye.qt import Qt, QtCore, QtWidgets, Signal, getOpenFileName, getSaveFileName
 from microEye.utils.gui_helper import *
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import TiffSeqHandler, ZarrImageSequence, uImage
 
 
 class MultiLineROISelector:

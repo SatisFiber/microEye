@@ -2,7 +2,7 @@ import dask.array
 import numpy as np
 
 from microEye.analysis.filters.base import TemporalFilter
-from microEye.utils.uImage import ZarrImageSequence
+from microEye.images import ImageSequenceBase
 
 
 class TemporalMedianFilter(TemporalFilter):
@@ -16,7 +16,7 @@ class TemporalMedianFilter(TemporalFilter):
 
     def getFrames(
             self, index,
-            dataHandler: ZarrImageSequence, c_slice=0, z_slice=0):
+            dataHandler: ImageSequenceBase, c_slice=0, z_slice=0):
         if self._temporal_window < 2:
             self._frames = None
             self._median = None

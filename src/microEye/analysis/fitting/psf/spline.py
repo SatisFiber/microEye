@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import UnivariateSpline, interp1d
 
-from microEye.analysis.fitting.pyfit3Dcspline.PSF.rubost_mean import robust_mean
+from microEye.analysis.fitting.psf.rubost_mean import robust_mean
 
 
 class Localization:

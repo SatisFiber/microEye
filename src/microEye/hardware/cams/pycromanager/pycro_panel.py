@@ -3,11 +3,6 @@ import time
 import traceback
 from enum import Enum
 
-from microEye.analysis.tools.roi_selectors import (
-    MultiRectangularROISelector,
-    convert_pos_size_to_rois,
-    convert_rois_to_pos_size,
-)
 from microEye.hardware.cams.camera_options import CamParams
 from microEye.hardware.cams.camera_panel import Camera_Panel
 from microEye.hardware.cams.pycromanager.pycro_cam import PycroCamera
@@ -16,13 +11,9 @@ from microEye.qt import (
     QtCore,
     QtGui,
     QtWidgets,
-    getOpenFileName,
-    getSaveFileName,
 )
-from microEye.utils.gui_helper import get_scaling_factor
 from microEye.utils.metadata_tree import MetaParams
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import uImage
 
 
 class PycroParams(Enum):

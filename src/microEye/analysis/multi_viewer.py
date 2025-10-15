@@ -1,12 +1,16 @@
 import json
 import os
+import re
 import webbrowser
 from enum import Enum
 from typing import Optional, Union
+from weakref import ref
 
 import cv2
 
+from microEye import __version__
 from microEye.analysis.fitting.results import FittingResults
+from microEye.analysis.tools.registration import RegistrationWidget
 from microEye.analysis.viewer import LocalizationsView, PSFView, StackView
 from microEye.qt import (
     QT_API,
@@ -26,6 +30,7 @@ from microEye.utils import StartGUI
 
 class DockKeys(Enum):
     FILE_SYSTEM = 'File System'
+    FILES_LIST = 'Files List'
     SMLM_ANALYSIS = 'SMLM Analysis'
     DATA_FILTERS = 'Data Filters'
 
@@ -49,7 +54,7 @@ class CustomFileSystemModel(QFileSystemModel):
             return False  # Do not show any files within a .zarr folder
 
         # Check if the current directory is a .zarr folder
-        if file_info.isDir() and file_name.endswith('.zarr'):
+        if file_name.endswith('.zarr'):
             return True  # Always accept .zarr folders themselves
 
         # Use the default filtering behavior for other files/folders
@@ -91,13 +96,14 @@ class multi_viewer(QMainWindow):
     def __init__(self, path=None):
         super().__init__()
         # Set window properties
-        self.title = 'Multi Viewer Module'
+        self.title = f'Multi Viewer Module v{__version__}'
         self.left = 0
         self.top = 0
         self._width = 1600
         self._height = 950
-        self._zoom = 1
-        self._n_levels = 4096
+
+        # {path: {'type': str, 'widget': QWidget}}
+        self._opened_files: dict[str, dict[str, QtWidgets.QWidget]] = {}
 
         # Threading
         self._threadpool = QtCore.QThreadPool.globalInstance()
@@ -132,6 +138,9 @@ class multi_viewer(QMainWindow):
         # Initialize the file system model / tree
         self.setupFileSystemTab(path)
 
+        # Setup opened files list
+        self.setup_files_list()
+
         # Tabify docks
         self.tabifyDocks()
 
@@ -164,6 +173,18 @@ class multi_viewer(QMainWindow):
         ] = {}  # Dictionary to store created docks
         self.layouts = {}
 
+    def setup_files_list(self):
+        self.opened_files_list = QtWidgets.QListWidget(self)
+        self.opened_files_list.setWindowTitle('Opened Files')
+        self.opened_files_list.itemClicked.connect(self._focus_opened_file)
+        self.create_tab(
+            DockKeys.FILES_LIST,
+            QtWidgets.QVBoxLayout,
+            'LeftDockWidgetArea',
+            widget=None,
+            visible=True,
+        ).addWidget(self.opened_files_list)
+
     def setupFileSystemTab(self, path):
         # Tiff File system tree viewer tab layout
         self.file_tree_layout = self.create_tab(
@@ -183,7 +204,7 @@ class multi_viewer(QMainWindow):
             | QtCore.QDir.Filter.Files
             | QtCore.QDir.Filter.NoDotAndDotDot
         )
-        self.model.setNameFilters(['*.tif', '*.tiff', '*.tsv', '*.h5'])
+        self.model.setNameFilters(['*.tif', '*.tiff', '*.tsv', '*.h5', '*.zarr'])
         self.model.setNameFilterDisables(False)
 
         # Create QTreeView
@@ -276,14 +297,18 @@ class multi_viewer(QMainWindow):
 
     def tabifyDocks(self):
         # Tabify docks
-        pass
+        if len(self.docks) > 1:
+            first_dock = next(iter(self.docks.values()))
+            for dock in list(self.docks.values())[1:]:
+                self.tabifyDockWidget(first_dock, dock)
 
     def setTabPositions(self):
         self.setTabPosition(
-            Qt.DockWidgetArea.LeftDockWidgetArea, QtWidgets.QTabWidget.TabPosition.East
+            Qt.DockWidgetArea.LeftDockWidgetArea, QtWidgets.QTabWidget.TabPosition.North
         )
         self.setTabPosition(
-            Qt.DockWidgetArea.RightDockWidgetArea, QtWidgets.QTabWidget.TabPosition.West
+            Qt.DockWidgetArea.RightDockWidgetArea,
+            QtWidgets.QTabWidget.TabPosition.North,
         )
 
     def raiseDocks(self):
@@ -296,6 +321,7 @@ class multi_viewer(QMainWindow):
         # Create file menu
         file_menu = menu_bar.addMenu('File')
         view_menu = menu_bar.addMenu('View')
+        tools_menu = menu_bar.addMenu('Tools')
         help_menu = menu_bar.addMenu('Help')
 
         # Create exit action
@@ -329,6 +355,34 @@ class multi_viewer(QMainWindow):
             view_menu.addAction(toggle_action)
             if '6' in QT_API:
                 connect(toggle_action, dock)
+
+        # Add tools menu actions
+        self.reg_window = None
+
+        def show_registration_tool():
+            if self.reg_window is not None:
+                self.reg_window.close()
+                self.reg_window = None
+
+            stacks = {}
+            for path, info in self._opened_files.items():
+                widget = info['widget']()
+                if info['type'] in ('TIFF', 'ZARR', 'ImageSeq') and isinstance(
+                    widget, StackView
+                ):
+                    channels = widget.stack_handler.shapeTCZYX()[1]
+                    for c in range(channels):
+                        key = (
+                            self._compact_display_name(path, info['type']) + f' (C{c})'
+                        )
+                        stacks[key.replace('\n', ' ')] = ref(widget.stack_handler)
+            self.reg_window = RegistrationWidget(stacks=stacks)
+            self.reg_window.show()
+
+        # Add tools menu actions
+        registration_tool = QAction('Registration Tool', self)
+        registration_tool.triggered.connect(show_registration_tool)
+        tools_menu.addAction(registration_tool)
 
         help_menu.addAction(github)
         help_menu.addAction(pypi)
@@ -413,6 +467,57 @@ class multi_viewer(QMainWindow):
             + QDateTime.currentDateTime().toString('hh:mm:ss,zzz')
         )
 
+    def _focus_opened_file(self, item):
+        if isinstance(item, str):
+            path = item
+        elif isinstance(item, QtWidgets.QListWidgetItem):
+            path = item.data(QtCore.Qt.ItemDataRole.UserRole)
+
+        widget = self._opened_files[path]['widget']()
+        for subwin in self.mdi_area.subWindowList():
+            if subwin.widget() is widget:
+                # subwin.raise_()
+                subwin.showMaximized()
+                break
+
+    @staticmethod
+    def _compact_display_name(path, type):
+        # extract drive if on windows
+        if os.name == 'nt':
+            drive, tail = os.path.splitdrive(path)
+            parts = tail.strip('/').split('/')
+            drive = f'[💻{drive}]'
+        else:
+            drive = '[💻ROOT]'
+            parts = path.strip('/').split('/')
+
+        parent = '' if len(parts) < 2 else f'\n[📁{parts[-2]}]'
+        basename = parts[-1]
+
+        # file name pattern 00__image_00000_roi_00.ome.tif
+        # extrat roi if exists regex
+        match = re.search(r'.*?(\d+)__image_(\d+)_roi_(\d+)', basename)
+        if match:
+            prefix = match.group(1)
+            image_num = match.group(2)
+            roi_num = match.group(3)
+            return (
+                f'{drive} [{type}]'
+                f'\n[{prefix}] [Image {image_num}] [ROI {roi_num}]{parent}'
+            )
+        elif len(basename) > 20:
+            return f'{drive} [{type}]\n...{basename[-20:]}{parent}'
+        else:
+            return f'{drive} [{type}]\n{basename}{parent}'
+
+    def _update_opened_files_list(self):
+        self.opened_files_list.clear()
+        for path, info in self._opened_files.items():
+            display_name = self._compact_display_name(path, type=info['type'])
+            item = QtWidgets.QListWidgetItem(f'{display_name}')
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, path)
+            self.opened_files_list.addItem(item)
+
     @Slot(QtCore.QModelIndex)
     def _open_file(self, index: QtCore.QModelIndex):
         # Set the Qt.WindowFlags for making the subwindow resizable
@@ -420,27 +525,40 @@ class multi_viewer(QMainWindow):
 
         path = self.model.filePath(index)
 
+        if path in self._opened_files:
+            self._focus_opened_file(path)
+            return
+
         if not os.path.isdir(path):
             if path.endswith('.tif') or path.endswith('.tiff'):
                 view = StackView(path, None)
                 view.localizedData.connect(self.localizedData)
+                file_type = 'TIFF'
+            elif path.endswith('.zarr'):
+                view = StackView(path)
+                view.localizedData.connect(self.localizedData)
+                file_type = 'ZARR'
             elif (
                 path.endswith('.h5') and not path.endswith('.psf.h5')
             ) or path.endswith('.tsv'):
                 results = FittingResults.fromFile(path, 1)
                 if results is not None:
                     view = LocalizationsView(results)
+                    file_type = 'HDF5' if path.endswith('.h5') else 'TSV'
                     print('Done importing results.')
                 else:
                     print('Error importing results.')
             elif path.endswith('.psf.h5'):
                 view = PSFView(path)
+                file_type = 'PSF'
         else:
             if path.endswith('.zarr'):
                 view = StackView(path)
+                file_type = 'ZARR'
             else:
                 try:
                     view = StackView(path, self.imsq_pattern.text())
+                    file_type = 'ImageSeq'
                 except Exception as e:
                     print(f'Error opening image sequence: {e}')
                     return
@@ -448,8 +566,19 @@ class multi_viewer(QMainWindow):
             view.localizedData.connect(self.localizedData)
 
         if view:
+            self._opened_files[path] = {'type': file_type, 'widget': ref(view)}
             window = self.mdi_area.addSubWindow(view)
+            # Install event filter
+            window.destroyed.connect(lambda _, p=path: self._on_subwindow_close(p))
             window.show()
+
+        self._update_opened_files_list()
+
+    def _on_subwindow_close(self, path):
+        # Remove file from opened files when subwindow closes
+        if path in self._opened_files:
+            del self._opened_files[path]
+            self._update_opened_files_list()
 
     def localizedData(self, path):
         index = self.model.index(path)

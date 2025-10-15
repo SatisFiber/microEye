@@ -15,8 +15,8 @@ from microEye.analysis.fitting.pyfit3Dcspline import (
     get_roi_list_CMOS,
 )
 from microEye.analysis.fitting.results import *
+from microEye.images import TiffSeqHandler, ZarrImageSequence, uImage
 from microEye.qt import Qt, QtWidgets, Signal
-from microEye.utils.uImage import TiffSeqHandler, ZarrImageSequence, uImage
 
 
 def get_blob_detector(

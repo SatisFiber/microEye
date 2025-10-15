@@ -2,7 +2,6 @@ from enum import Enum
 
 import numpy as np
 import pandas as pd
-from numpy.core._exceptions import _ArrayMemoryError
 from scipy.interpolate import interp1d
 
 from microEye.analysis.fitting.processing import *
@@ -693,7 +692,7 @@ class FittingResults:
                 drift = shift_estimation(np.array(sub_images), pixelSize, upsampling)
             else:
                 raise ValueError(f'Unknown drift estimation method: {method}')
-        except _ArrayMemoryError as e:
+        except MemoryError as e:
             print(f'Drift cross-correlation failed: {e}')
             return
 

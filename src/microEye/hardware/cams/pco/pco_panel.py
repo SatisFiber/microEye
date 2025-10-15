@@ -10,7 +10,7 @@ from microEye.hardware.cams.pco.pco_cam import (
     pco_cam,
     pcoParams,
 )
-from microEye.qt import QDateTime, QtCore, QtWidgets, getOpenFileName, getSaveFileName
+from microEye.qt import QDateTime, QtCore
 from microEye.utils.metadata_tree import MetaParams
 
 

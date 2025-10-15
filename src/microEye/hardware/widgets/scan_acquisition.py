@@ -7,6 +7,7 @@ import qdarkstyle
 import tifffile as tf
 from pyqtgraph.parametertree import Parameter
 
+from microEye.images.uImage import uImage
 from microEye.qt import (
     QApplication,
     Qt,
@@ -16,7 +17,6 @@ from microEye.qt import (
     getSaveFileName,
 )
 from microEye.utils import Tree
-from microEye.utils.uImage import uImage
 
 
 class TileImage:

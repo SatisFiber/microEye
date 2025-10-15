@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from microEye.analysis.fitting.psf.stats import *
 from microEye.analysis.fitting.results import PARAMETER_HEADERS
-from microEye.utils.uImage import TiffSeqHandler, ZarrImageSequence, uImage
+from microEye.images import TiffSeqHandler, ZarrImageSequence, uImage
 
 
 def gaussian(x, a, x0, sigma, offset):

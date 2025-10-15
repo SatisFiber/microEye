@@ -8,9 +8,9 @@ This toolkit is compatible with the [hardware](#hardware) used in our microscope
 
 ```bash
    __  ____              ____                ___  ____  ___       ____
-  /  |/  (_)__________  / __/_ _____   _  __|_  |/ / / / _ \___ _|_  /
- / /|_/ / / __/ __/ _ \/ _// // / -_) | |/ / __//_  _// // / _ `//_ <
-/_/  /_/_/\__/_/  \___/___/\_, /\__/  |___/____(_)_/(_)___/\_,_/____/
+  /  |/  (_)__________  / __/_ _____   _  __|_  |/ / / / _ \___ _/ / /
+ / /|_/ / / __/ __/ _ \/ _// // / -_) | |/ / __//_  _// // / _ `/_  _/
+/_/  /_/_/\__/_/  \___/___/\_, /\__/  |___/____(_)_/(_)___/\_,_/ /_/
                           /___/
                          ___   __     __                         
                         / _ | / /__  / /  ___ _  
@@ -20,7 +20,7 @@ This toolkit is compatible with the [hardware](#hardware) used in our microscope
 ```
 
 ![Package Health](https://snyk.io/advisor/python/microEye/badge.svg)
-![Python Version](https://img.shields.io/badge/Python->=3.9_|_<3.12-blue)
+![Python Version](https://img.shields.io/badge/Python-3.11-blue)
 ![Package Version](https://img.shields.io/pypi/v/microEye.svg)
 ![Package Version](https://img.shields.io/badge/GUI_Platform-PySide6|PyQt6|PyQt5-navy)
 [![DOI](https://img.shields.io/badge/HardwareX-10.1016/j.ohx.2022.e00368-orange)](https://doi.org/10.1016/j.ohx.2022.e00368)

@@ -9,14 +9,9 @@ from microEye.qt import (
     QDateTime,
     QtCore,
     QtGui,
-    QtWidgets,
-    getOpenFileName,
-    getSaveFileName,
 )
-from microEye.utils.gui_helper import get_scaling_factor
 from microEye.utils.metadata_tree import MetaParams
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import uImage
 
 
 class ImageHandler(pylon.ImageEventHandler):

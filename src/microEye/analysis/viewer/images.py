@@ -34,6 +34,13 @@ from microEye.analysis.fitting.results import (
 from microEye.analysis.tools.kymograms import KymogramWidget
 from microEye.analysis.viewer.image_options_widget import FittingOptions, Parameters
 from microEye.analysis.viewer.layers_widget import ImageItemsWidget
+from microEye.images import (
+    WORD,
+    TiffSeqHandler,
+    ZarrImageSequence,
+    saveZarrImage,
+    uImage,
+)
 from microEye.qt import (
     QDateTime,
     Qt,
@@ -49,13 +56,6 @@ from microEye.utils.gui_helper import *
 from microEye.utils.labelled_slider import LabelledSlider
 from microEye.utils.metadata_tree import MetadataEditorTree, MetaParams
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import (
-    WORD,
-    TiffSeqHandler,
-    ZarrImageSequence,
-    saveZarrImage,
-    uImage,
-)
 
 
 class StackView(QtWidgets.QWidget):
@@ -129,6 +129,7 @@ class StackView(QtWidgets.QWidget):
         self.fitting_options_widget.paramsChanged.connect(self.slider_changed)
 
         self.frames_slider.valueChanged.connect(self.slider_changed)
+        self.c_slider.valueChanged.connect(self.slider_changed)
         self.z_slider.valueChanged.connect(self.slider_changed)
         self.lr_0.sigRegionChangeFinished.connect(self.slider_changed)
 
@@ -239,11 +240,10 @@ class StackView(QtWidgets.QWidget):
 
         count = self.image_layers.count()
 
-        nChannel = self.stack_handler.shapeTCZYX()[
-            1
-        ]  # TODO: add stack shape method pop-up
+        nChannel = 1
+        # TODO: add stack shape method pop-up
         for idx in range(nChannel + 1):
-            image_item = self.addImageItem(
+            self.addImageItem(
                 self.empty_image if count < 1 else self.empty_alpha,
                 compMode='SourceOver' if count < 1 else 'Plus',
                 name=path if idx < nChannel else 'Localization Layer',
@@ -274,14 +274,9 @@ class StackView(QtWidgets.QWidget):
         self._bins = np.arange(WORD)
         green_brush = pg.mkBrush(0, 255, 0, 32)
 
-        self.plot_refs = []
-        # Add hist channels plot references
-        colors = 'brgcyk'
-        for idx in range(self.stack_handler.shapeTCZYX()[1]):
-            ref = self.histogram.plot(
-                self._bins, np.zeros_like(self._bins), pen=pg.mkPen(color=colors[idx])
-            )
-            self.plot_refs.append(ref)
+        self.plot_ref = self.histogram.plot(
+            self._bins, np.zeros_like(self._bins), pen=pg.mkPen(color='b')
+        )
 
         self.lr_0 = pg.LinearRegionItem(
             (0, WORD - 1),
@@ -546,12 +541,8 @@ class StackView(QtWidgets.QWidget):
 
         self.uImage.equalizeLUT(min_max, True)
 
-        # TODO: Update plotrefs
         if self.uImage._hist.ndim == 1:
-            self.plot_refs[0].setData(self.uImage._hist)
-        elif self.uImage._hist.ndim == 2:
-            for idx in range(self.uImage._hist.shape[1]):
-                self.plot_refs[idx].setData(self.uImage._hist[:, idx])
+            self.plot_ref.setData(self.uImage._hist)
 
         if self.get_param(Parameters.AUTO_STRETCH).value():
             self.lr_0.sigRegionChangeFinished.disconnect(self.slider_changed)
@@ -561,12 +552,10 @@ class StackView(QtWidgets.QWidget):
 
     def update_images(self):
         if self.uImage._view.ndim == 2:
-            # self.image_items[0][1] = self.uImage._view
             self.setImage(self.uImage._view, index=0)
-        elif self.uImage._view.ndim == 3:
-            for idx in range(self.uImage._view.shape[2]):
-                # self.image_items[idx][1] = self.uImage._view[..., idx]
-                self.setImage(self.uImage._view[..., idx], index=idx)
+        # elif self.uImage._view.ndim == 3:
+        #     for idx in range(self.uImage._view.shape[2]):
+        # self.setImage(self.uImage._view[..., idx], index=idx)
 
     def apply_cmos_maps(self, image):
         varim = None
@@ -1217,7 +1206,7 @@ class StackView(QtWidgets.QWidget):
             if not mask_pattern:
                 raise ValueError('No mask pattern provided for a directory path')
             return TiffSeqHandler(tf.TiffSequence(f'{path}/{mask_pattern}'))
-        elif os.path.isdir(path) and path.endswith('.zarr'):
+        elif path.endswith('.zarr'):
             return ZarrImageSequence(path)
         elif os.path.isfile(path) and (path.endswith('.tif') or path.endswith('.tiff')):
             return TiffSeqHandler(tf.TiffSequence([path]))

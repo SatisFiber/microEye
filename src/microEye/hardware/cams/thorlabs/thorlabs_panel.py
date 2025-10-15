@@ -252,7 +252,7 @@ class Thorlabs_Panel(Camera_Panel):
 
         self.refresh_flash()
 
-        self.OME_tab.set_param_value(MetaParams.EXPOSURE, self._cam.exposure_current)
+        self.OME_tab.set_param_value(MetaParams.EXPOSURE, self._cam.exposure_current.value)
         if self.master:
             self.exposureChanged.emit()
 
@@ -341,7 +341,7 @@ class Thorlabs_Panel(Camera_Panel):
             return  # if acquisition is already going on
 
         if not self._cam.memory_allocated:
-            self._cam.allocate_memory_buffer()  # allocate memory
+            self._cam.allocate_memory()  # allocate memory
 
         if not self._cam.capture_video:
             self._cam.start_live_capture()  # start live capture (freerun mode)
@@ -371,7 +371,7 @@ class Thorlabs_Panel(Camera_Panel):
             return  # if acquisition is already going on
 
         if not self._cam.memory_allocated:
-            self._cam.allocate_memory_buffer()  # allocate memory
+            self._cam.allocate_memory()  # allocate memory
 
         self._cam.refresh_info()  # refresh adapter info
 

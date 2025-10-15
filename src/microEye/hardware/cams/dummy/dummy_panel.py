@@ -5,7 +5,7 @@ import traceback
 from microEye.hardware.cams.camera_options import CamParams
 from microEye.hardware.cams.camera_panel import Camera_Panel
 from microEye.hardware.cams.micam import DummyParams, miDummy
-from microEye.qt import QDateTime, QtCore, QtWidgets, getOpenFileName, getSaveFileName
+from microEye.qt import QDateTime, QtCore
 from microEye.utils.metadata_tree import MetaParams
 
 

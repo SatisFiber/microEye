@@ -426,6 +426,12 @@ class DisplayManager(QtCore.QObject):
         for display in list(cls.DISPLAYS.values()):
             display.close()
 
+    @classmethod
+    def close_display(cls, display_name: str):
+        '''Close a specific display by name.'''
+        if display_name in cls.DISPLAYS:
+            cls.DISPLAYS[display_name].close()
+
 
 # class ImageProcessor(QtCore.QObject):
 #     '''A worker class for processing and sending images.'''

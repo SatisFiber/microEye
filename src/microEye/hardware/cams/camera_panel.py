@@ -20,12 +20,12 @@ from microEye.hardware.cams.micam import miCamera
 from microEye.hardware.cams.shortcuts import (
     CameraShortcutsWidget,
 )
+from microEye.images.uImage import uImage
 from microEye.qt import QDateTime, Qt, QtCore, QtWidgets, Signal, Slot
 from microEye.utils.display import DisplayManager, fast_autolevels_opencv
 from microEye.utils.gui_helper import get_scaling_factor
 from microEye.utils.metadata_tree import MetadataEditorTree, MetaParams
 from microEye.utils.thread_worker import QThreadWorker
-from microEye.utils.uImage import uImage
 
 
 class Camera_Panel(QtWidgets.QGroupBox):
