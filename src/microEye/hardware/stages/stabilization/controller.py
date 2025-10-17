@@ -12,6 +12,9 @@ class RejectionMethod(Enum):
     STANDARD_DEVIATION = 'Standard Deviation'
     MEDIAN_ABSOLUTE_DEVIATION = 'Median Absolute Deviation'
 
+    def __str__(self):
+        return self.value
+
 
 def reject_outliers_sd(
     data: np.ndarray, threshold: float = 2.0, min_valid: int = 3
@@ -81,95 +84,95 @@ class BaseController(ABC):
     '''
 
     def __init__(self, n_axes: int = 3):
-        self.__n_axes = 3
+        self._n_axes = 3
 
-        self.__Kp = np.ones((n_axes,))
-        self.__Ki = np.zeros((n_axes,))
-        self.__Kd = np.zeros((n_axes,))
-        self.__integral = np.zeros((n_axes,))
-        self.__last_error = np.zeros((n_axes,))
-        self.__last_time = np.zeros((n_axes,))
+        self._Kp = np.ones((n_axes,))
+        self._Ki = np.zeros((n_axes,))
+        self._Kd = np.zeros((n_axes,))
+        self._integral = np.zeros((n_axes,))
+        self._last_error = np.zeros((n_axes,))
+        self._last_time = np.zeros((n_axes,))
 
-        self.__rejection_method = RejectionMethod.NONE
-        self.__outlier_threshold = 2.0
-        self.__outlier_min_points = 4
+        self._rejection_method = RejectionMethod.NONE
+        self._outlier_threshold = 2.0
+        self._outlier_min_points = 4
 
     @property
     def rejection_method(self) -> RejectionMethod:
-        return self.__rejection_method
+        return self._rejection_method
 
     @rejection_method.setter
     def rejection_method(self, method: RejectionMethod):
-        self.__rejection_method = method
+        self._rejection_method = method
 
     @property
     def outlier_threshold(self) -> float:
-        return self.__outlier_threshold
+        return self._outlier_threshold
 
     @outlier_threshold.setter
     def outlier_threshold(self, value: float):
-        self.__outlier_threshold = value
+        self._outlier_threshold = value
 
     @property
     def outlier_min_points(self) -> int:
-        return self.__outlier_min_points
+        return self._outlier_min_points
 
     @outlier_min_points.setter
     def outlier_min_points(self, value: int):
-        self.__outlier_min_points = value
+        self._outlier_min_points = value
 
     def outlier_rejection(self, data: np.ndarray, **kwargs) -> np.ndarray:
         if kwargs.get('threshold') is None:
-            kwargs['threshold'] = self.__outlier_threshold
+            kwargs['threshold'] = self._outlier_threshold
         if kwargs.get('min_valid') is None:
-            kwargs['min_valid'] = self.__outlier_min_points
+            kwargs['min_valid'] = self._outlier_min_points
 
-        return apply_rejection_method(data, self.__rejection_method, **kwargs)
+        return apply_rejection_method(data, self._rejection_method, **kwargs)
 
     def get_Kp(self, axis: Axis) -> Union[float, np.ndarray]:
         '''
         Get the proportional gain for a specific axis.
         '''
         if axis is None:
-            return self.__Kp.copy()
+            return self._Kp.copy()
 
-        return self.__Kp[axis.axis_index()]
+        return self._Kp[axis.axis_index()]
 
     def set_Kp(self, value: float, axis: Axis):
         '''
         Set the proportional gain for a specific axis.
         '''
-        self.__Kp[axis.axis_index()] = value
+        self._Kp[axis.axis_index()] = value
 
     def get_Ki(self, axis: Axis) -> Union[float, np.ndarray]:
         '''
         Get the integral gain for a specific axis.
         '''
         if axis is None:
-            return self.__Ki.copy()
+            return self._Ki.copy()
 
-        return self.__Ki[axis.axis_index()]
+        return self._Ki[axis.axis_index()]
 
     def set_Ki(self, value: float, axis: Axis):
         '''
         Set the integral gain for a specific axis.
         '''
-        self.__Ki[axis.axis_index()] = value
+        self._Ki[axis.axis_index()] = value
 
     def get_Kd(self, axis: Axis) -> Union[float, np.ndarray]:
         '''
         Get the derivative gain for a specific axis.
         '''
         if axis is None:
-            return self.__Kd.copy()
+            return self._Kd.copy()
 
-        return self.__Kd[axis.axis_index()]
+        return self._Kd[axis.axis_index()]
 
     def set_Kd(self, value: float, axis: Axis):
         '''
         Set the derivative gain for a specific axis.
         '''
-        self.__Kd[axis.axis_index()] = value
+        self._Kd[axis.axis_index()] = value
 
     def set_gains(
         self,
@@ -182,13 +185,13 @@ class BaseController(ABC):
         Set the controller gains for a specific axis.
         '''
         idx = slice(None) if axis is None else axis.axis_index()
-        self.__Kp[idx] = (
+        self._Kp[idx] = (
             np.asarray(Kp) if isinstance(Kp, (float, int)) else np.asarray(Kp)[idx]
         )
-        self.__Ki[idx] = (
+        self._Ki[idx] = (
             np.asarray(Ki) if isinstance(Ki, (float, int)) else np.asarray(Ki)[idx]
         )
-        self.__Kd[idx] = (
+        self._Kd[idx] = (
             np.asarray(Kd) if isinstance(Kd, (float, int)) else np.asarray(Kd)[idx]
         )
 
@@ -201,8 +204,8 @@ class BaseController(ABC):
             if axes is not None and len(axes) > 0
             else slice(None)
         )
-        self.__integral[idx] = 0.0
-        self.__last_time[idx] = 0.0
+        self._integral[idx] = 0.0
+        self._last_time[idx] = 0.0
 
     @abstractmethod
     def response(
@@ -250,23 +253,23 @@ class PIDController(BaseController):
         delta = np.array([x_shifts, y_shifts, z_shift], dtype=np.float64)
 
         # Initialize last_time if first call
-        self.__last_time[self.__last_time <= 0.0] = t
-        delta_t = t - self.__last_time
+        self._last_time[self._last_time <= 0.0] = t
+        delta_t = t - self._last_time
         delta_t = np.clip(delta_t, 1e-3, 1.0)  # limit max delta_t to avoid spikes
 
         # Integral term
-        self.__integral += delta * delta_t
+        self._integral += delta * delta_t
 
         # Derivative term
-        derivative = (delta - self.__last_error) / delta_t
+        derivative = (delta - self._last_error) / delta_t
 
         # PID output
         output = (
-            self.__Kp * delta + self.__Ki * self.__integral + self.__Kd * derivative
+            self._Kp * delta + self._Ki * self._integral + self._Kd * derivative
         )
 
         # Update buffers
-        self.__last_error = delta
-        self.__last_time[:] = t
+        self._last_error = delta
+        self._last_time[:] = t
 
         return -output

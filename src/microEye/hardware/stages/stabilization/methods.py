@@ -315,7 +315,7 @@ class ReflectionStrategy(StabilizationStrategy):
         return {
             'params': params,
             'fit_params': fit_params,
-            'line_profile': line_profile.tolist(),
+            'line_profile': line_profile.copy().tolist(),
         }
 
     def get_shifts(
@@ -455,13 +455,13 @@ class FiducialStrategy(StabilizationStrategy):
             return {'params': params, 'fit_params': None}
 
         # Get ROI region
-        roi_region = roi_manager.get_roi_region('z', image)
+        roi_region = roi_manager.get_roi_region('xy', image)
 
         # Find peaks and fit Gaussian
         fit_params = self.fiducials_fit(
             roi_region,
-            x=roi_manager.get_roi('z').top_left[0],
-            y=roi_manager.get_roi('z').top_left[1],
+            x=roi_manager.get_roi('xy').top_left[0],
+            y=roi_manager.get_roi('xy').top_left[1],
         )
 
         # Process results

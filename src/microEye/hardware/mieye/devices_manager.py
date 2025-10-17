@@ -138,7 +138,7 @@ class DeviceManager(QtCore.QObject):
         self.widgetAdded.emit(DEVICES.HID_CONTROLLER, self.hid_controller)
 
     def _init_focus_stabilizer(self):
-        FocusStabilizer.instance().moveStage.connect(StageManager.instance().move_z)
+        FocusStabilizer.instance().moveXYZ.connect(StageManager.instance().move_relative)
         FocusStabilizer.instance().startWorker()
 
         self.focus = focusWidget()

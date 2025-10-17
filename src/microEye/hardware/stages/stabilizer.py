@@ -85,6 +85,7 @@ class FocusStabilizerParams(Enum):
     PEAK_STOP = 'Stop Peak Acquisition'
 
     PREVIEW_IMAGE = 'Preview Image'
+    AUTO_RANGE = 'Auto Range'
 
     def __str__(self):
         '''
@@ -169,6 +170,7 @@ class FocusStabilizer(QtCore.QObject):
         self.__initial_z_position = None
         self.__initial_xy_positions = None
 
+        self.__tau = 0.0
         self.__err_th = 0.001
 
         self.__preview = True
@@ -547,6 +549,7 @@ class FocusStabilizer(QtCore.QObject):
             'Kp': self.__controller.get_Kp(None).tolist(),
             'Ki': self.__controller.get_Ki(None).tolist(),
             'Kd': self.__controller.get_Kd(None).tolist(),
+            'tau': self.__tau,
             'error_th': self.__err_th,
             'cal_coeff': self.__cal_manager.get_coefficient().tolist(),
             'use_cal': self.__use_cal,
@@ -709,11 +712,16 @@ class FocusStabilizer(QtCore.QObject):
                 self.__tracker.last_time, shifts[Axis.X], shifts[Axis.Y], shifts[Axis.Z]
             )
 
-            output[Axis.X.axis_index()] *= self.isFocusStabilized(Axis.X)
-            output[Axis.Y.axis_index()] *= self.isFocusStabilized(Axis.Y)
-            output[Axis.Z.axis_index()] *= self.isFocusStabilized(Axis.Z)
+            # output[Axis.X.axis_index()] *= self.isFocusStabilized(Axis.X)
+            # output[Axis.Y.axis_index()] *= self.isFocusStabilized(Axis.Y)
+            # output[Axis.Z.axis_index()] *= self.isFocusStabilized(Axis.Z)
 
-            self.moveXYZ(
+            for axis in Axis:
+                output[axis.axis_index()] *= self.isFocusStabilized(axis)
+                if self.isInverted(axis):
+                    output[axis.axis_index()] *= -1
+
+            self.moveXYZ.emit(
                 output[Axis.X.axis_index()],
                 output[Axis.Y.axis_index()],
                 output[Axis.Z.axis_index()],
@@ -801,6 +809,16 @@ class FocusStabilizerView(Tree):
         `FocusStabilizerView` class.
         '''
         params = [
+            {
+                'name': str(FocusStabilizerParams.AUTO_RANGE),
+                'type': 'bool',
+                'tooltip': r'''
+                    Automatically adjust the plots range based on data.\n
+                    Keep on for best performance.\n
+                    DON'T USE THE PlotWidget BUILT-IN AUTO RANGE IT WILL CAUSE LAGS!
+                    (Button with capital A in the plots)''',
+                'value': True,
+            },
             {
                 'name': str(FocusStabilizerParams.PREVIEW_IMAGE),
                 'type': 'bool',
@@ -1234,12 +1252,15 @@ class FocusStabilizerView(Tree):
                 FocusStabilizer.instance().roi_manager.get_linewidth(),
             )
 
+            self.setRoiActivated.emit()
+
         if 'Stabilizer' in config:
             stabilizer: dict = config['Stabilizer']
 
             Kp = stabilizer.get('Kp', (1.0,) * 3)
             Ki = stabilizer.get('Ki', (0.0,) * 3)
             Kd = stabilizer.get('Kd', (0.0,) * 3)
+            tau = stabilizer.get('tau', 0)
             error_th = stabilizer.get('error_th', 0.0)
             cal_coeff = stabilizer.get('cal_coeff', (1.0,) * 3)
             inverted = stabilizer.get('inverted', (False,) * 3)
@@ -1262,7 +1283,8 @@ class FocusStabilizerView(Tree):
                     float(cal_coeff[axis.axis_index()]),
                 )
                 self.set_param_value(
-                    FocusStabilizerParams(f'{axis.name}.Inverted'), bool(inverted)
+                    FocusStabilizerParams(f'{axis.name}.Inverted'),
+                    bool(inverted[axis.axis_index()]),
                 )
 
             method = stabilizer.get('method', StabilizationMethods.REFLECTION.value)
@@ -1275,13 +1297,12 @@ class FocusStabilizerView(Tree):
             self.set_param_value(
                 FocusStabilizerParams.USE_CAL, bool(stabilizer.get('use_cal'))
             )
+            self.set_param_value(FocusStabilizerParams.FT_TAU, float(tau))
             self.set_param_value(FocusStabilizerParams.FT_ERROR_TH, float(error_th))
-            self.set_param_value(
-                FocusStabilizerParams.STABILIZATION_METHOD, StabilizationMethods(method)
-            )
+            self.set_param_value(FocusStabilizerParams.STABILIZATION_METHOD, method)
             self.set_param_value(
                 FocusStabilizerParams.XY_OUTLIER_REJECTION_METHOD,
-                RejectionMethod(rejection_method),
+                rejection_method,
             )
             self.set_param_value(
                 FocusStabilizerParams.XY_OUTLIER_REJECTION_THRESHOLD,

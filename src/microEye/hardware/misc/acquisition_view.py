@@ -11,7 +11,7 @@ class AcquisitionView(QtWidgets.QWidget):
 
         self.setWindowTitle('Image View (Snap/Live)')
 
-        pg.setConfigOption('imageAxisOrder', 'row-major')
+        pg.setConfigOptions(antialias=False, imageAxisOrder='row-major')
 
         size = QApplication.primaryScreen().availableGeometry()
         minDim = int(min(size.width(), size.height()) * 0.9)

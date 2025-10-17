@@ -75,15 +75,17 @@ class FrameCounter(QtCore.QObject):
         self.count += 1
 
         if self.last_update == 0:
-            self.last_update = perf_counter()
+            self.last_update = perf_counter_ns()
             self.startTimer(self.interval)
 
     def timerEvent(self, evt):
-        now = perf_counter()
-        elapsed = now - self.last_update
-        fps = self.count / elapsed
+        now = perf_counter_ns()
+        count = self.count
+        self.count -= count
+
+        elapsed = (now - self.last_update) / 1e9
+        fps = count / elapsed
         self.last_update = now
-        self.count = 0
         self.sigFpsUpdate.emit(fps)
 
 
@@ -106,6 +108,10 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
         super().__init__(parent)
         self.setWindowTitle(title)
 
+        self._target_fps = kwargs.get('target_fps', 80)
+        self._last_update = perf_counter_ns()
+        self._updating = False
+
         width = kwargs.get('width', 512)
         height = kwargs.get('height', 512)
         self.image_aspect_ratio = width / height
@@ -119,6 +125,14 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
             screen_size.height() - 100,
         )
 
+        self._init_layout(**kwargs)
+
+        # Connect signals
+        self.image_update_signal.connect(self.update_image)
+
+    def _init_layout(self, **kwargs):
+        '''Initialize the layout and widgets.'''
+
         # Setup pyqtgraph with optimizations
         pg.setConfigOptions(antialias=False, imageAxisOrder='row-major')
 
@@ -130,7 +144,7 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         # Use PlotWidget instead which should be more compatible with PyQt6
-        self.plot_widget = pg.GraphicsView()
+        self.plot_widget = pg.GraphicsView(useOpenGL=True)
         # remove margins from the plot widget
         self.plot_widget.setContentsMargins(0, 0, 0, 0)
 
@@ -148,9 +162,10 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
         self.image_item = pg.ImageItem(
             axisOrder='row-major', border=kwargs.get('border', 'y')
         )
+
         self.image_item.setImage(
             np.zeros(
-                (height, width),
+                (kwargs.get('height', 512), kwargs.get('width', 512)),
             )
         )  # Initialize with a blank image
         self.view_box.addItem(self.image_item)
@@ -214,9 +229,6 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
 
         layout.addWidget(self.histogram, 1)
 
-        # Connect signals
-        self.image_update_signal.connect(self.update_image)
-
     def showEvent(self, event: QtGui.QShowEvent):
         '''Ensure minimum width is set after the widget is shown.'''
         super().showEvent(event)
@@ -271,33 +283,46 @@ class PyQtGraphDisplay(QtWidgets.QWidget):
 
     def update_image(self, image: np.ndarray, kwargs: dict):
         '''Update the main image view.'''
+        now = perf_counter_ns()
+        elapsed = (now - self._last_update) / 1e9  # Convert
 
-        thresholds = kwargs.get('threshold', [0, 255])
-        plot_data: np.ndarray = kwargs.get('plot')
+        if self._updating:
+            return  # Skip update if not enough time has passed
 
-        # Update histogram and CDF plots each second
-        if self.frame_counter.count % 1000 == 0:
-            # Update plots
-            for idx in range(plot_data.shape[1]):
-                self._plot_refs[idx].setData(plot_data[:, idx])
-
-        if kwargs.get('autoLevels', True):
-            # autoLevels = True, set levels to min/max of the image
-            kwargs['levels'] = np.array(thresholds).squeeze()
-            self.set_regions(thresholds)
-            self.histogram.setXRange(np.min(thresholds), np.max(thresholds))
-        else:
-            # autoLevels = False, set levels to the region of interest
-            kwargs['levels'] = self.get_regions()
-
-        self.image_item.setImage(
-            image,
-            autoLevels=False,
-            levels=kwargs.get('levels'),
-            # lut=useLut,
-            # autoDownsample=True,
-        )
+        self._updating = True
         self.frame_counter.update()  # Update frame counter
+
+        try:
+            thresholds = kwargs.get('threshold', [0, 255])
+            plot_data: np.ndarray = kwargs.get('plot')
+
+            # Update histogram and CDF plots each 100 ms
+            if elapsed >= 1.0:
+                self._last_update = now
+                for idx in range(plot_data.shape[1]):
+                    self._plot_refs[idx].setData(plot_data[:, idx])
+
+                if kwargs.get('autoLevels', True):
+                    self.set_regions(thresholds)
+                    self.histogram.setXRange(np.min(thresholds), np.max(thresholds))
+
+            if kwargs.get('autoLevels', True):
+                # autoLevels = True, set levels to min/max of the image
+                kwargs['levels'] = np.array(thresholds).squeeze()
+            else:
+                # autoLevels = False, set levels to the region of interest
+                kwargs['levels'] = self.get_regions()
+
+            self.image_item.setImage(
+                image,
+                autoLevels=False,
+                levels=kwargs.get('levels'),
+                _callSync='off'
+                # lut=useLut,
+                # autoDownsample=True,
+            )
+        finally:
+            self._updating = False
 
     def adjust_widget_aspect_ratio(self, event: QtGui.QResizeEvent):
         """Adjust the widget's size to maintain the image's aspect ratio."""

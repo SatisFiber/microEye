@@ -33,7 +33,7 @@ class LineProfiler(QtWidgets.QWidget):
         #     self.average)
         self.data = np.random.normal(size=(512, 512))
         self.remote_view = pg.GraphicsView()
-        pg.setConfigOptions(antialias=True, imageAxisOrder='row-major')
+        pg.setConfigOptions(antialias=False, imageAxisOrder='row-major')
         self.remote_plt = pg.ViewBox(invertY=True)
         self.remote_view.setCentralItem(self.remote_plt)
         self.remote_plt.setAspectLocked()

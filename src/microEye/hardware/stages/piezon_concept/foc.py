@@ -82,7 +82,7 @@ class PiezoConceptFOC(AbstractStage):
     @emit_after_signal('moveFinished')
     def move_absolute(self, x, y, z, **kwargs):
         if self.is_open():
-            self.z = min(max(z, 0), self.z_max)
+            self.z = int(min(max(z, 0), self.z_max))
             self.send_command(f'MOVEZ {z}n\n'.encode())
             self.last_command = 'MOVEZ'
 
@@ -95,7 +95,7 @@ class PiezoConceptFOC(AbstractStage):
     @emit_after_signal('moveFinished')
     def move_relative(self, x, y, z, **kwargs):
         if self.is_open():
-            self.z = min(max(self.z + z, 0), self.z_max)
+            self.z = int(min(max(self.z + z, 0), self.z_max))
             self.send_command(f'MOVEZ {self.z}n\n'.encode())
             self.last_command = 'MOVEZ'
 
