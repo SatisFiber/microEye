@@ -1,0 +1,97 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:143.0) Gecko/20100101 Firefox/143.0" version="28.2.7">
+  <diagram name="Page-1" id="7sW1tiGCACPRUffHgOC1">
+    <mxGraphModel dx="748" dy="504" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Ios3coRFoSPuiTucELqH-28" value="" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="510" y="70" width="70" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-20" value="" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="496" y="199" width="50" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-10" value="" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="50" width="240" height="430" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-1" value="sample" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="300" y="60" width="150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-2" value="" style="shape=or;whiteSpace=wrap;html=1;rotation=-90;" vertex="1" parent="1">
+          <mxGeometry x="323.5" y="76.5" width="69" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-3" value="Objective" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="278" y="140" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-4" value="" style="shape=link;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="100" relative="1" as="geometry">
+            <mxPoint x="316" y="90" as="sourcePoint" />
+            <mxPoint x="416" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-5" value="" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="392" y="250" as="sourcePoint" />
+            <mxPoint x="342" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-6" value="" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="411" y="350" as="sourcePoint" />
+            <mxPoint x="361" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-7" value="" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="359" y="450" as="sourcePoint" />
+            <mxPoint x="409" y="400" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-11" value="750nm short pass" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="269.5" y="209" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-13" value="&lt;div&gt;Excitation&lt;/div&gt;&lt;div&gt;Filter&lt;/div&gt;&lt;div&gt;405nm&lt;/div&gt;&lt;div&gt;488nm&lt;/div&gt;&lt;div&gt;563nm&lt;/div&gt;&lt;div&gt;635nm&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="302" y="314" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-14" value="&lt;div&gt;mirror&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="390" y="420" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-17" value="" style="endArrow=classic;html=1;rounded=0;strokeColor=light-dark(#000000,#660000);startSize=9;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="626" y="120" as="sourcePoint" />
+            <mxPoint x="550" y="90" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="626" y="236" />
+              <mxPoint x="382" y="236" />
+              <mxPoint x="396" y="110" />
+              <mxPoint x="366" y="90" />
+              <mxPoint x="336" y="110" />
+              <mxPoint x="356" y="210" />
+              <mxPoint x="530" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-21" value="" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="496" y="249" as="sourcePoint" />
+            <mxPoint x="546" y="199" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ios3coRFoSPuiTucELqH-26" value="" style="endArrow=classic;html=1;rounded=0;strokeColor=light-dark(#000000,#FF0080);startSize=9;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="626" y="123" as="sourcePoint" />
+            <mxPoint x="536" y="93" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="626" y="239" />
+              <mxPoint x="382" y="239" />
+              <mxPoint x="396" y="113" />
+              <mxPoint x="356" y="83" />
+              <mxPoint x="316" y="113" />
+              <mxPoint x="356" y="213" />
+              <mxPoint x="520" y="230" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
